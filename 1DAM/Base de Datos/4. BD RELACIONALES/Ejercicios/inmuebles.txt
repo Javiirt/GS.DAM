@@ -1,0 +1,111 @@
+CREATE TABLE Persona(
+  cod VARCHAR(20),
+  dni VARCHAR (9) NOT NULL,
+  nombre VARCHAR (15) NOT NULL,
+  apellidos VARCHAR (50) NOT NULL,
+  empleado VARCHAR (2) NOT NULL,
+  telefono VARCHAR (9) NOT NULL,
+  PRIMARY KEY(cod)  
+);
+
+CREATE TABLE Ser_contacto(
+  cod_cliente VARCHAR (20) NOT NULL,
+  cod_trabajador VARCHAR (20) NOT NULL,
+  PRIMARY KEY(cod_cliente, cod_trabajador),
+  CONSTRAINT FK1_Ser_contacto_Persona_cod
+    FOREIGN KEY (cod_cliente)
+    REFERENCES Persona(cod),
+  CONSTRAINT FK2_Ser_contacto_Persona_cod
+    FOREIGN KEY (cod_trabajador)
+    REFERENCES Persona(cod)
+);
+
+CREATE TABLE Inmueble(
+  cod VARCHAR(20),
+  metros int NOT NULL,
+  descripcion VARCHAR (200) NOT NULL,
+  direccion VARCHAR (200) NOT NULL,
+  PRIMARY KEY(cod)  
+);
+
+CREATE TABLE Piso(
+  cod VARCHAR(20),
+  cod_inmueble VARCHAR (20) NOT NULL,
+  PRIMARY KEY(cod),
+  CONSTRAINT FK_Piso_Inmueble_cod
+    FOREIGN KEY (cod_inmueble)
+    REFERENCES Inmueble(cod)
+);
+
+CREATE TABLE Locals(
+  cod_inmueble VARCHAR (20) NOT NULL,
+  uso VARCHAR (100) NOT NULL,
+  servicio VARCHAR (100) NOT NULL,
+  PRIMARY KEY(cod_inmueble),
+  CONSTRAINT FK_Locals_Inmueble_cod
+    FOREIGN KEY (cod_inmueble)
+    REFERENCES Inmueble(cod)
+);
+
+CREATE TABLE Garage(
+  cod_inmueble VARCHAR (20) NOT NULL,
+  numero int NOT NULL,
+  planta int NOT NULL,
+  junto VARCHAR (2) NOT NULL,
+  cod_piso VARCHAR (20),
+  PRIMARY KEY(cod_inmueble),
+  CONSTRAINT FK_Garage_Inmueble_cod
+    FOREIGN KEY (cod_inmueble)
+    REFERENCES Inmueble(cod),
+  CONSTRAINT FK_Garage_Piso_cod
+    FOREIGN KEY (cod_piso)
+    REFERENCES Piso(cod)
+);
+
+CREATE TABLE Compra(
+  cod VARCHAR(20),
+  cod_inmueble VARCHAR (20) NOT NULL,
+  fecha VARCHAR (10) NOT NULL,
+  valor INT NOT NULL,
+  cod_persona VARCHAR (20) NOT NULL,  
+  PRIMARY KEY(cod, cod_inmueble),
+  CONSTRAINT FK_Compra_Inmueble_cod
+    FOREIGN KEY (cod_inmueble)
+    REFERENCES Inmueble(cod),
+  CONSTRAINT FK_Compra_Persona_cod
+    FOREIGN KEY (cod_persona)
+    REFERENCES Persona(cod),
+);
+
+CREATE TABLE Alquiler(
+  N int,
+  cod_inmueble VARCHAR (20) NOT NULL,
+  cod_persona VARCHAR (20) NOT NULL,  
+  fecha_agente VARCHAR (10) NOT NULL,
+  cod_compra VARCHAR (20) NOT NULL,
+  PRIMARY KEY(N, cod_inmueble),
+  CONSTRAINT FK_Alquiler_Inmueble_cod
+    FOREIGN KEY (cod_inmueble)
+    REFERENCES Inmueble(cod),
+  CONSTRAINT FK_Alquiler_Persona_cod
+    FOREIGN KEY (cod_persona)
+    REFERENCES Persona(cod),
+  CONSTRAINT FK_Alquiler_Compra_cod
+    FOREIGN KEY (cod_compra)
+    REFERENCES Compra(cod)
+);
+
+CREATE TABLE Pago(  
+  año INT NOT NULL,
+  mes INT NOT NULL,
+  N_alquiler INT NOT NULL,
+  cod_inmueble VARCHAR (20) NOT NULL,
+  valor INT NOT NULL,
+  PRIMARY KEY(año, mes, N_alquiler, cod_inmueble),
+  CONSTRAINT FK_Pago_Alquiler_N
+    FOREIGN KEY (N_alquiler)
+    REFERENCES Alquiler(N),
+  CONSTRAINT FK_Pago_Inmueble_cod
+    FOREIGN KEY (cod_inmueble)
+    REFERENCES Inmueble(cod),
+);

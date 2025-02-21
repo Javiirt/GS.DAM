@@ -1,0 +1,29 @@
+EJERCICIO 4
+-----------
+1 	INICIO
+2 	LEER año
+3 	SI año%400==0 ENTOCES
+4		ESCRBIR  es bisiesto
+5 	SINO SI año%4==0 && año%100!=0 ENTOCES
+6		ESCRBIR  es bisiesto
+7 	SINO 
+8		ESCRBIR  no es bisiesto
+9 	FINSI
+10	FIN
+
+
+EJERCICIO 6
+-----------
+1	 INICIO
+2 	HACER suma = 0 y contador = 1
+3 	LEER edad
+4 	HACER suma+=edad
+5 	ESCRIBIR quieres introducir más edades? (s/n)
+6 	LEER respuesta
+7 	SI respuesta=='s'
+8 		VOLVER AL PASO 3
+9 	SINO
+10		IR AL PASO 11
+11 	FINSI
+12 	ESCRIBIR suma/contador
+13 	FIN

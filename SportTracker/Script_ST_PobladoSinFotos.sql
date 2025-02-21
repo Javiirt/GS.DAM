@@ -1,0 +1,1117 @@
+DROP DATABASE IF EXISTS SPORTTRACKER;
+CREATE DATABASE SPORTTRACKER;
+USE SPORTTRACKER;
+
+
+CREATE TABLE DEPORTE (
+    ID INTEGER PRIMARY KEY AUTO_INCREMENT,
+    NOMBRE VARCHAR(25) UNIQUE,
+    NUMEROJUGADORES INTEGER NOT NULL,
+    DESCRIPCION VARCHAR(600) NOT NULL,
+    EMPATABLE BOOL DEFAULT TRUE,
+    SOLICITUD BOOL DEFAULT FALSE,
+    IMAGEN LONGBLOB  
+);
+
+CREATE TABLE USUARIO (
+    ID INTEGER PRIMARY KEY AUTO_INCREMENT,
+    USUARIO VARCHAR(25) UNIQUE,
+    CONTRASENA VARBINARY(100) NOT NULL, 
+    NOMBRE VARCHAR(50) NOT NULL, 
+    DNI VARCHAR(9) NOT NULL UNIQUE,
+    FECHANACIMIENTO DATE NOT NULL,
+    DENUNCIAS INT DEFAULT 0 NOT NULL
+);
+
+
+
+CREATE TABLE ROL (
+    ID INTEGER PRIMARY KEY AUTO_INCREMENT,
+    NOMBRE VARCHAR(25) UNIQUE
+);
+
+INSERT INTO ROL (NOMBRE) VALUES ("Administrador");
+INSERT INTO ROL (NOMBRE) VALUES ("Capitan");
+INSERT INTO ROL (NOMBRE) VALUES ("Usuario");
+INSERT INTO ROL (NOMBRE) VALUES ("Miembro");
+
+CREATE TABLE INSCRIPCION (
+    ID INTEGER PRIMARY KEY AUTO_INCREMENT,
+    ID_USUARIO INTEGER NOT NULL,
+    ID_DEPORTE INTEGER,
+    ID_ROL INTEGER NOT NULL,
+    FECHAINSCRIPCION DATE NOT NULL,
+
+    CONSTRAINT UQ_INSCRIPCION_USUARIO_DEPORTE_ROL
+    UNIQUE (ID_USUARIO, ID_DEPORTE, ID_ROL),
+
+    CONSTRAINT FK_INSCRIPCION_USUARIO
+    FOREIGN KEY (ID_USUARIO)
+    REFERENCES USUARIO (ID) ON DELETE CASCADE,
+
+    CONSTRAINT FK_INSCRIPCION_DEPORTE
+    FOREIGN KEY (ID_DEPORTE)
+    REFERENCES DEPORTE (ID) ON DELETE CASCADE,
+
+    CONSTRAINT FK_INSCRIPCION_ROL
+    FOREIGN KEY (ID_ROL)
+    REFERENCES ROL (ID) ON DELETE CASCADE
+);
+
+DELIMITER //
+
+CREATE PROCEDURE INSCRIBIRUSUARIO(
+    IN p_usuario VARCHAR(25),
+    IN p_deporte VARCHAR(25)
+)
+BEGIN
+    DECLARE v_usuario_id INT;
+    DECLARE v_deporte_id INT;
+    DECLARE v_rol_id INT;
+
+    -- Obtener el ID del usuario
+    SELECT ID INTO v_usuario_id FROM USUARIO WHERE USUARIO = p_usuario;
+
+    -- Obtener el ID del deporte
+    SELECT ID INTO v_deporte_id FROM DEPORTE WHERE NOMBRE = p_deporte;
+
+    -- Obtener el ID del rol de usuario
+    SELECT ID INTO v_rol_id FROM ROL WHERE NOMBRE = 'Usuario';
+
+    -- Verificar si ya existe una inscripción para este usuario en este deporte
+    IF NOT EXISTS (
+        SELECT 1 FROM INSCRIPCION 
+        WHERE ID_USUARIO = v_usuario_id 
+        AND ID_DEPORTE = v_deporte_id
+    ) THEN
+        -- Si no hay ninguna inscripción, agregar una nueva
+        INSERT INTO INSCRIPCION (ID_USUARIO, ID_DEPORTE, ID_ROL, FECHAINSCRIPCION)
+        VALUES (v_usuario_id, v_deporte_id, v_rol_id, CURDATE());
+    END IF;
+END //
+
+DELIMITER ;
+
+DELIMITER //
+CREATE TRIGGER trg_after_insert_usuario
+AFTER INSERT ON USUARIO
+FOR EACH ROW
+BEGIN
+    INSERT INTO INSCRIPCION (ID_USUARIO, ID_ROL, FECHAINSCRIPCION)
+    VALUES (NEW.ID, (SELECT ID FROM ROL WHERE NOMBRE = 'Usuario'), CURDATE());
+END;
+//
+DELIMITER ;
+
+INSERT INTO USUARIO (USUARIO, CONTRASENA, NOMBRE, DNI, FECHANACIMIENTO) VALUES("admin", "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918", "admin", "000000000", "2002-06-15");
+INSERT INTO INSCRIPCION (ID_USUARIO, ID_ROL, FECHAINSCRIPCION) VALUES ((SELECT ID FROM USUARIO WHERE NOMBRE = 'admin'), (SELECT ID FROM ROL WHERE NOMBRE = 'Administrador'), CURDATE());
+
+
+CREATE TABLE EQUIPO (
+    ID INTEGER PRIMARY KEY AUTO_INCREMENT,
+    NOMBRE VARCHAR(30) UNIQUE,
+    ID_DEPORTE INTEGER NOT NULL,
+    ID_CAPITAN INTEGER,
+    IMAGEN LONGBLOB NOT NULL,
+    ACTIVO BOOL NOT NULL DEFAULT TRUE,
+    DISPONIBLE BOOL NOT NULL DEFAULT TRUE,
+    LOCALIZACION VARCHAR(100) NOT NULL,    
+    LATITUD DECIMAL(9,6) , 
+    LONGITUD DECIMAL(9,6) ,
+
+    CONSTRAINT FK_EQUIPO_DEPORTE
+    FOREIGN KEY (ID_DEPORTE)
+    REFERENCES DEPORTE (ID) ON DELETE CASCADE,
+
+    CONSTRAINT FK_EQUIPO_USUARIO
+    FOREIGN KEY (ID_CAPITAN)
+    REFERENCES USUARIO (ID)
+);
+
+DELIMITER //
+-- Trigger despues de eliminar un usuario
+CREATE TRIGGER after_delete_usuario
+BEFORE DELETE
+ON USUARIO FOR EACH ROW
+BEGIN
+    -- Actualizar equipos donde el usuario era el capitan
+    UPDATE EQUIPO
+    SET ID_CAPITAN = NULL, ACTIVO = FALSE, DISPONIBLE = FALSE
+    WHERE ID_CAPITAN = OLD.ID;
+END;
+//
+DELIMITER ;
+
+
+CREATE TABLE MIEMBROSEQUIPO (
+    ID INTEGER PRIMARY KEY AUTO_INCREMENT,
+    ID_MIEMBRO INTEGER NOT NULL,
+    ID_EQUIPO INTEGER NOT NULL, 
+
+    CONSTRAINT UQ_MIEMBROSEQUIPO
+    UNIQUE (ID_MIEMBRO, ID_EQUIPO),
+
+    CONSTRAINT FK_MIEMBROSEQUIPO_EQUIPO
+    FOREIGN KEY (ID_EQUIPO)
+    REFERENCES EQUIPO (ID) ON DELETE CASCADE,
+
+    CONSTRAINT FK_MIEMBROSEQUIPO_USUARIO
+    FOREIGN KEY (ID_MIEMBRO)
+    REFERENCES USUARIO (ID) ON DELETE CASCADE
+);
+
+DELIMITER //
+
+CREATE PROCEDURE ACTUALIZAREQUIPO(
+IN EQUIPONOMBRE VARCHAR(255))
+BEGIN
+    DECLARE JUGADORESCOUNT INT;
+    DECLARE MAXJUGADORES INT;
+    DECLARE EQUIPOID INT;
+    
+    -- Obtener el ID del equipo
+    SELECT ID INTO EQUIPOID FROM EQUIPO WHERE NOMBRE = EQUIPONOMBRE;
+    
+    -- Obtener el número de jugadores en el equipo
+    SELECT COUNT(*) INTO JUGADORESCOUNT FROM MIEMBROSEQUIPO WHERE ID_EQUIPO = EQUIPOID;
+    
+    -- Obtener el número máximo de jugadores permitidos para el deporte del equipo
+    SELECT NUMEROJUGADORES INTO MAXJUGADORES FROM DEPORTE D JOIN EQUIPO E ON D.ID = E.ID_DEPORTE WHERE E.ID = EQUIPOID;
+    
+    -- Comprobar y actualizar la disponibilidad del equipo
+    IF JUGADORESCOUNT < MAXJUGADORES * 2 THEN
+		UPDATE EQUIPO SET DISPONIBLE = TRUE WHERE ID = EQUIPOID;
+	ELSE
+		UPDATE EQUIPO SET DISPONIBLE = FALSE WHERE ID = EQUIPOID;
+	END IF;
+    
+END//
+
+DELIMITER ;
+
+
+
+DELIMITER //
+
+CREATE PROCEDURE AGREGAR_EQUIPO(
+    IN nombre_equipo_insertar VARCHAR(255),
+    IN id_deporte_insertar INT,
+    IN id_capitan_insertar INT,
+    IN imagen_equipo LONGBLOB,
+    IN ubicacion_equipo VARCHAR(100),
+    IN latitud_equipo DECIMAL(9,6),
+    IN longitud_equipo DECIMAL(9,6)
+)
+BEGIN
+    DECLARE deporte_existente INT;
+    DECLARE usuario_valido INT;
+    DECLARE equipo_existente INT;
+    DECLARE equipo_id INT;
+    DECLARE deporte_id INT;
+
+    -- Verificar si el deporte existe
+    SELECT COUNT(*) INTO deporte_existente FROM DEPORTE WHERE ID = id_deporte_insertar;
+
+    -- Verificar si el usuario esta inscrito en el mismo deporte y no tiene un rol de miembro o capitan
+    SELECT COUNT(*) INTO usuario_valido FROM INSCRIPCION
+    WHERE ID_USUARIO = id_capitan_insertar AND ID_DEPORTE = id_deporte_insertar AND ID_ROL IN (SELECT ID FROM ROL WHERE NOMBRE IN ('Miembro', 'Capitan'));
+
+    -- Verificar si el equipo ya existe
+    SELECT COUNT(*) INTO equipo_existente FROM EQUIPO WHERE NOMBRE = nombre_equipo_insertar;
+
+    -- Insertar al usuario en MIEMBROSEQUIPO y la inscripcion con rol de capitan si todo es correcto y el equipo no existe
+    IF deporte_existente = 1 AND usuario_valido = 0 AND equipo_existente = 0 THEN
+        -- Insertar el equipo
+        INSERT INTO EQUIPO (NOMBRE, ID_DEPORTE, ID_CAPITAN, IMAGEN, LOCALIZACION, LATITUD, LONGITUD)
+        VALUES (nombre_equipo_insertar, id_deporte_insertar, id_capitan_insertar, imagen_equipo,ubicacion_equipo,latitud_equipo,longitud_equipo);
+
+        -- Obtener el ID del nuevo equipo
+        SELECT ID INTO equipo_id FROM EQUIPO WHERE NOMBRE = nombre_equipo_insertar;
+
+        -- Insertar el usuario en MIEMBROSEQUIPO
+        INSERT INTO MIEMBROSEQUIPO (ID_MIEMBRO, ID_EQUIPO)
+        VALUES (id_capitan_insertar, equipo_id);
+
+        -- Insertar una nueva inscripcion con rol de capitan
+        INSERT INTO INSCRIPCION (ID_USUARIO, ID_DEPORTE, ID_ROL, FECHAINSCRIPCION)
+        VALUES (id_capitan_insertar, id_deporte_insertar, (SELECT ID FROM ROL WHERE NOMBRE = 'Capitan'), CURDATE());
+
+		
+        -- CALL ACTUALIZAREQUIPO();
+    ELSE
+        -- Mostrar mensaje de error
+        SELECT 'Error: Verifique que el deporte existe, el usuario es valido y el equipo no existe.' AS Mensaje;
+        
+    END IF;
+END;
+
+//
+DELIMITER ;
+
+
+
+
+
+CREATE TABLE COMPETICION (
+    ID INTEGER PRIMARY KEY AUTO_INCREMENT,
+    NOMBRE VARCHAR(50) UNIQUE, 
+    ID_DEPORTE INTEGER NOT NULL,
+    NEQUIPOS INTEGER NOT NULL, -- controlar sea multiplo de 2 para liga y potencia de 2 para torneo
+    -- NGESTORES INTEGER,
+    ID_EQUIPO_GANADOR INTEGER,
+    LOCALIDAD VARCHAR(100) NOT NULL,
+    ID_CREADOR INTEGER,
+    FECHA_COMIENZO DATE NOT NULL,
+    TIPO INTEGER NOT NULL, -- 0 LIGA 1 TORNEO
+    RONDA INTEGER DEFAULT -1,
+    DISPONIBLE BOOLEAN DEFAULT TRUE,
+    LATITUD DECIMAL(9,6) , 
+    LONGITUD DECIMAL(9,6),
+
+    CONSTRAINT FK_COMPETICION_USUARIO
+    FOREIGN KEY (ID_CREADOR)
+    REFERENCES USUARIO (ID),
+
+    CONSTRAINT FK_COMPETICION_DEPORTE
+    FOREIGN KEY (ID_DEPORTE)
+    REFERENCES DEPORTE (ID) ON DELETE CASCADE,
+
+    CONSTRAINT FK_COMPETICION_EQUIPO
+    FOREIGN KEY (ID_EQUIPO_GANADOR)
+    REFERENCES EQUIPO (ID)
+);
+
+DELIMITER //
+CREATE TRIGGER before_delete_usuario
+BEFORE DELETE ON USUARIO
+FOR EACH ROW
+BEGIN
+    UPDATE COMPETICION
+    SET ID_CREADOR = NULL
+    WHERE ID_CREADOR = OLD.ID;
+END;
+//
+DELIMITER ;
+
+
+
+
+CREATE TABLE COMPETIDORES (
+    ID INTEGER PRIMARY KEY AUTO_INCREMENT,
+    ID_COMPETICION INTEGER NOT NULL,
+    ID_EQUIPO INTEGER NOT NULL,
+
+    CONSTRAINT UQ_COMPETIDORES
+    UNIQUE (ID_COMPETICION, ID_EQUIPO),
+
+    CONSTRAINT FK_COMPETIDORES_COMPETICION
+    FOREIGN KEY (ID_COMPETICION)
+    REFERENCES COMPETICION (ID) ON DELETE CASCADE,
+
+    CONSTRAINT FK_COMPETIDORES_EQUIPO
+    FOREIGN KEY (ID_EQUIPO)
+    REFERENCES EQUIPO (ID) ON DELETE CASCADE
+);
+
+ CREATE TABLE MIEMBROSCOMPETICION (
+    ID INTEGER PRIMARY KEY AUTO_INCREMENT,
+    ID_COMPETIDORES INTEGER NOT NULL,
+    ID_MIEMBROSEQUIPO INTEGER NOT NULL,
+
+    CONSTRAINT UQ_MIEMBROSCOMPETICION
+    UNIQUE (ID_COMPETIDORES, ID_MIEMBROSEQUIPO),
+
+    CONSTRAINT FK_MIEMBROSCOMPETICION_COMPETIDORES
+    FOREIGN KEY (ID_COMPETIDORES)
+    REFERENCES COMPETIDORES (ID) ON DELETE CASCADE,
+
+    CONSTRAINT FK_MIEMBROSCOMPETICION_MIEMBROSEQUIPO
+    FOREIGN KEY (ID_MIEMBROSEQUIPO)
+    REFERENCES MIEMBROSEQUIPO (ID) ON DELETE CASCADE
+);
+
+DELIMITER //
+CREATE TRIGGER INSERT_COMPETIDOR
+AFTER INSERT ON COMPETIDORES
+FOR EACH ROW
+BEGIN
+    -- Insertar los miembros del equipo en la tabla MIEMBROSEQUIPO
+    INSERT INTO MIEMBROSCOMPETICION (ID_COMPETIDORES, ID_MIEMBROSEQUIPO)
+    SELECT NEW.ID , M.ID
+    FROM MIEMBROSEQUIPO M
+    WHERE M.ID_EQUIPO = NEW.ID_EQUIPO;
+END;
+//
+DELIMITER ;
+
+DELIMITER //
+
+CREATE FUNCTION CREAR_COMPETICION (
+    nombre_competicion VARCHAR(50),
+    id_deporte VARCHAR(50),
+    numero_equipos INT,
+    localidad VARCHAR(150),
+    usuario_creador VARCHAR(50),
+    fecha_comienzo DATE,
+    tipo_competicion INT,
+    latitud DECIMAL(9,6),
+    longitud DECIMAL(9,6),
+    nombre_equipo VARCHAR(30)
+) RETURNS VARCHAR(255) DETERMINISTIC
+BEGIN
+    DECLARE competicion_existente INT;
+    DECLARE equipo_id INT;
+    DECLARE competicion_id INT;
+    DECLARE mensaje VARCHAR(255);
+
+    -- Verificar si ya existe una competición con el mismo nombre
+    SELECT COUNT(*) INTO competicion_existente FROM COMPETICION WHERE NOMBRE = nombre_competicion;
+
+    IF competicion_existente = 0 THEN
+        -- Insertar la competición
+        INSERT INTO COMPETICION (NOMBRE, ID_DEPORTE, NEQUIPOS, LOCALIDAD, ID_CREADOR, FECHA_COMIENZO, TIPO, LATITUD, LONGITUD)
+        VALUES (nombre_competicion, (SELECT ID FROM DEPORTE WHERE NOMBRE = id_deporte  ), numero_equipos, localidad, (SELECT ID FROM USUARIO WHERE USUARIO = usuario_creador  ), fecha_comienzo, tipo_competicion, latitud, longitud);
+
+        -- Obtener el ID de la nueva competición
+        SELECT ID INTO competicion_id FROM COMPETICION WHERE NOMBRE = nombre_competicion;
+
+        -- Verificar si el equipo ya existe
+        SELECT ID INTO equipo_id FROM EQUIPO WHERE NOMBRE = nombre_equipo;
+
+        IF equipo_id IS NOT NULL THEN
+            -- Insertar el equipo como competidor
+            INSERT INTO COMPETIDORES (ID_COMPETICION, ID_EQUIPO)
+            VALUES (competicion_id, equipo_id);
+            SET mensaje := 'EXITO';
+        ELSE
+            SET mensaje := 'ERROR_EQUIPO';
+        END IF;
+    ELSE
+        SET mensaje := 'ERROR_COMPETICION';
+    END IF;
+
+    RETURN mensaje;
+END;
+ //DELIMITER ;
+ 
+ DELIMITER //
+
+CREATE PROCEDURE VerificarCompetencia(IN nombreCompetencia VARCHAR(50))
+BEGIN
+    DECLARE competenciaID INT;
+    DECLARE numEquipos INT;
+
+    -- Obtener el ID de la competición
+    SELECT ID INTO competenciaID FROM COMPETICION WHERE NOMBRE = nombreCompetencia;
+
+    -- Contar el número de equipos competidores para la competición
+    SELECT COUNT(*) INTO numEquipos FROM COMPETIDORES WHERE ID_COMPETICION = competenciaID;
+
+    -- Si no hay equipos competidores, eliminar la competición
+    IF numEquipos = 0 THEN
+        DELETE FROM COMPETICION WHERE ID = competenciaID;
+    
+    -- Si el número de equipos competidores es igual al número de equipos de la competición, marcar como no disponible
+    ELSEIF numEquipos = (SELECT NEQUIPOS FROM COMPETICION WHERE ID = competenciaID) THEN
+        UPDATE COMPETICION SET DISPONIBLE = FALSE WHERE ID = competenciaID;
+    
+    -- Si no, marcar como disponible
+    ELSE
+        UPDATE COMPETICION SET DISPONIBLE = TRUE WHERE ID = competenciaID;
+    END IF;
+END //
+
+DELIMITER ;
+
+
+
+CREATE TABLE NOTICIA (
+    ID INTEGER PRIMARY KEY AUTO_INCREMENT, 
+    ID_COMPETICION INTEGER NOT NULL UNIQUE,
+    FECHA DATE NOT NULL,
+    HORA TIME NOT NULL,
+
+    CONSTRAINT FK_NOTICIA_COMPETICION
+    FOREIGN KEY (ID_COMPETICION)
+    REFERENCES COMPETICION (ID) ON DELETE CASCADE
+);
+
+DELIMITER //
+
+CREATE TRIGGER competicion_actualizacion
+AFTER UPDATE ON COMPETICION
+FOR EACH ROW
+BEGIN
+    DECLARE equipo_existente INT;
+
+    -- Verificar si ID_EQUIPO_GANADOR ha sido modificado
+    IF NEW.ID_EQUIPO_GANADOR IS NOT NULL  THEN
+        -- Comprobar la existencia del equipo ganador en COMPETIDORES
+        SELECT COUNT(*) INTO equipo_existente FROM COMPETIDORES C
+        WHERE C.ID_COMPETICION = NEW.ID AND C.ID_EQUIPO = NEW.ID_EQUIPO_GANADOR;
+
+        -- Verificar si el equipo ganador ha sido actualizado
+        IF NEW.ID_EQUIPO_GANADOR IS NOT NULL AND equipo_existente = 1 THEN
+            DELETE FROM NOTICIA WHERE ID_COMPETICION = NEW.ID;
+            INSERT INTO NOTICIA (ID_COMPETICION, FECHA, HORA) VALUES (NEW.ID, CURDATE(), CURTIME());
+        ELSE
+            -- Si el equipo no existe en COMPETIDORES, mostrar un mensaje de error o tomar alguna accion adecuada
+            SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'El equipo ganador no esta inscrito en la competicion.';
+        END IF;
+    END IF;
+END;
+//
+
+DELIMITER ;
+
+
+
+CREATE TABLE COMENTARIO(
+    ID INTEGER PRIMARY KEY AUTO_INCREMENT, 
+    ID_NOTICIA INTEGER NOT NULL, 
+    TEXTO VARCHAR(100) NOT NULL,
+    ID_USUARIO INTEGER NOT NULL,  
+    FECHA DATE NOT NULL,
+    HORA TIME NOT NULL,
+    DENUNCIADO BOOLEAN NOT NULL DEFAULT FALSE,
+
+    CONSTRAINT FK_COMENTARIO_NOTICIA
+    FOREIGN KEY (ID_NOTICIA)
+    REFERENCES NOTICIA (ID) ON DELETE CASCADE,
+
+    CONSTRAINT FK_COMENTARIO_USUARIO
+    FOREIGN KEY (ID_USUARIO)
+    REFERENCES USUARIO (ID) ON DELETE CASCADE
+);
+
+DELIMITER //
+CREATE TRIGGER DENUNCIA_COMENTARIO
+BEFORE DELETE ON COMENTARIO FOR EACH ROW
+BEGIN
+    DECLARE usuarioId INT;
+    
+    -- Obtener el ID del usuario asociado al comentario eliminado
+    SELECT ID_USUARIO INTO usuarioId FROM COMENTARIO WHERE ID = OLD.ID;
+    
+    -- Incrementar el numero de denuncias del usuario si el comentario estaba denunciado
+    IF OLD.DENUNCIADO = TRUE THEN
+        UPDATE USUARIO SET DENUNCIAS = DENUNCIAS + 1 WHERE ID = usuarioId;
+    END IF;
+END;
+//
+DELIMITER ;
+
+CREATE TABLE INFORMAL(
+    ID INTEGER PRIMARY KEY AUTO_INCREMENT, 
+    FECHA DATE NOT NULL,
+    HORA VARCHAR(5) NOT NULL,
+    LOCALIZACION VARCHAR(100) NOT NULL,    
+    ID_DEPORTE INTEGER NOT NULL,
+    LATITUD DECIMAL(9,6) , 
+    LONGITUD DECIMAL(9,6),
+    DISPONIBLE BOOL DEFAULT TRUE,
+
+    CONSTRAINT FK_INFORMAL_DEPORTE
+    FOREIGN KEY (ID_DEPORTE)
+    REFERENCES DEPORTE (ID) ON DELETE CASCADE
+);
+
+CREATE TABLE JUGADORESINFORMAL (
+    ID INTEGER PRIMARY KEY AUTO_INCREMENT, 
+    ID_INFORMAL INTEGER NOT NULL,
+    ID_USUARIO INTEGER NOT NULL,
+
+    CONSTRAINT UQ_JUGADORESINFORMAL
+    UNIQUE (ID_INFORMAL, ID_USUARIO),
+
+    CONSTRAINT FK_JUGADORESINFORMAL_INFORMAL
+    FOREIGN KEY (ID_INFORMAL)
+    REFERENCES INFORMAL (ID) ON DELETE CASCADE,
+
+    CONSTRAINT FK_JUGADORESINFORMAL_USUARIO
+    FOREIGN KEY (ID_USUARIO)
+    REFERENCES USUARIO (ID) ON DELETE CASCADE
+);
+
+
+DELIMITER //
+CREATE TRIGGER after_insert_jugadoresinformal
+AFTER INSERT ON JUGADORESINFORMAL
+FOR EACH ROW
+BEGIN
+    DECLARE jugadores_count INT;
+    DECLARE max_jugadores INT;
+    DECLARE informal_id INT;
+    
+    -- Obtener el numero actual de jugadores para el ID_INFORMAL insertado
+    SELECT COUNT(*) INTO jugadores_count FROM JUGADORESINFORMAL WHERE ID_INFORMAL = NEW.ID_INFORMAL;
+    
+    -- Obtener el numero maximo de jugadores para el deporte de este informal
+    SELECT NUMEROJUGADORES INTO max_jugadores FROM DEPORTE D JOIN INFORMAL I ON D.ID = I.ID_DEPORTE WHERE I.ID = NEW.ID_INFORMAL;
+    
+    -- Obtener el ID del informal para actualizar el DISPONIBLE
+    SELECT ID_INFORMAL INTO informal_id FROM JUGADORESINFORMAL WHERE ID = NEW.ID;
+    
+    -- Si el numero de jugadores alcanza el maximo, actualizar DISPONIBLE a FALSE
+    IF jugadores_count = (max_jugadores*2) THEN
+        UPDATE INFORMAL SET DISPONIBLE = FALSE WHERE ID = informal_id;
+    ELSE
+        -- Si se añade un jugador y no alcanza el maximo, actualizar DISPONIBLE a TRUE
+        UPDATE INFORMAL SET DISPONIBLE = TRUE WHERE ID = informal_id;
+    END IF;
+END
+//
+DELIMITER ;
+
+DELIMITER //
+CREATE TRIGGER after_delete_jugadoresinformal
+AFTER DELETE ON JUGADORESINFORMAL
+FOR EACH ROW
+BEGIN
+    DECLARE jugadores_count INT;
+    DECLARE max_jugadores INT;
+    DECLARE informal_id INT;
+    
+    -- Obtener el numero actual de jugadores para el ID_INFORMAL afectado
+    SELECT COUNT(*) INTO jugadores_count FROM JUGADORESINFORMAL WHERE ID_INFORMAL = OLD.ID_INFORMAL;
+    
+    -- Obtener el numero maximo de jugadores para el deporte de este informal
+    SELECT NUMEROJUGADORES INTO max_jugadores FROM DEPORTE D JOIN INFORMAL I ON D.ID = I.ID_DEPORTE WHERE I.ID = OLD.ID_INFORMAL;
+    
+    -- Obtener el ID del informal para actualizar DISPONIBLE
+    SET informal_id = OLD.ID_INFORMAL;
+    
+    -- Si el numero de jugadores alcanza 0, eliminar el informal
+    IF jugadores_count = 0 THEN
+        DELETE FROM INFORMAL WHERE ID = informal_id;
+    ELSE
+        -- Si quedan jugadores, actualizar DISPONIBLE a TRUE
+        UPDATE INFORMAL SET DISPONIBLE = TRUE WHERE ID = informal_id;
+    END IF;
+END;
+//
+DELIMITER ;
+
+
+
+
+CREATE TABLE AMISTOSO(
+    ID INTEGER PRIMARY KEY AUTO_INCREMENT, 
+    FECHA DATE NOT NULL,
+    HORA VARCHAR(5) NOT NULL,
+    LOCALIZACION VARCHAR(100) NOT NULL,
+    ID_DEPORTE INTEGER NOT NULL,
+    ID_EQUIPO1 INTEGER ,
+    ID_EQUIPO2 INTEGER ,
+    PUNTOS_EQUIPO1 INTEGER NOT NULL DEFAULT -1,
+    PUNTOS_EQUIPO2 INTEGER NOT NULL DEFAULT -1,
+    LATITUD DECIMAL(9,6) , 
+    LONGITUD DECIMAL(9,6) , 
+    DISPONIBLE BOOLEAN DEFAULT TRUE,
+
+    CONSTRAINT FK_AMISTOSO_DEPORTE
+    FOREIGN KEY (ID_DEPORTE)
+    REFERENCES DEPORTE (ID) ON DELETE CASCADE,
+
+    CONSTRAINT FK_AMISTOSO_EQUIPO1
+    FOREIGN KEY (ID_EQUIPO1)
+    REFERENCES EQUIPO (ID) ON DELETE CASCADE,
+
+    CONSTRAINT FK_AMISTOSO_EQUIPO2
+    FOREIGN KEY (ID_EQUIPO2)
+    REFERENCES EQUIPO (ID) ON DELETE CASCADE
+);
+
+CREATE TABLE JORNADA(
+    ID INTEGER PRIMARY KEY AUTO_INCREMENT, 
+    ID_COMPETICION INTEGER NOT NULL,
+    EQUIPOSRESTANTES INTEGER NOT NULL,
+    FECHA DATE NOT NULL,
+    HORA VARCHAR(5) NOT NULL,
+    LOCALIZACION VARCHAR(100) NOT NULL,
+    ID_EQUIPO1 INTEGER NOT NULL,
+    ID_EQUIPO2 INTEGER NOT NULL,
+    PUNTOS_EQUIPO1 INTEGER DEFAULT NULL,
+    PUNTOS_EQUIPO2 INTEGER DEFAULT NULL,
+    LATITUD DECIMAL(9,6), 
+    LONGITUD DECIMAL(9,6), 
+
+    CONSTRAINT FK_JORNADA_COMPETICION
+    FOREIGN KEY (ID_COMPETICION)
+    REFERENCES COMPETICION (ID) ON DELETE CASCADE,
+
+    CONSTRAINT FK_JORNADA_EQUIPO1
+    FOREIGN KEY (ID_EQUIPO1)
+    REFERENCES EQUIPO (ID),
+
+    CONSTRAINT FK_JORNADA_EQUIPO2
+    FOREIGN KEY (ID_EQUIPO2)
+    REFERENCES EQUIPO (ID)
+);
+
+DELIMITER //
+
+CREATE PROCEDURE ELIMINAR_EQUIPO(IN nombreEquipo VARCHAR(30))
+BEGIN
+    DECLARE equipoID INT;
+	DECLARE fechaHoraActual DATETIME;
+    
+	SET fechaHoraActual = NOW();
+    
+    -- Obtener el ID del equipo dado el nombre proporcionado
+    SELECT ID INTO equipoID FROM EQUIPO WHERE NOMBRE = nombreEquipo;
+
+    -- Eliminar todos los miembros del equipo dado su ID
+    DELETE FROM MIEMBROSEQUIPO WHERE ID_EQUIPO = equipoID;
+    
+    -- Modificar los amistosos con ID_EQUIPO1 igual al ID del equipo eliminado
+    -- y cuya fecha y hora sean anteriores a la fecha y hora actual
+    UPDATE AMISTOSO
+    SET PUNTOS_EQUIPO1 = 1, PUNTOS_EQUIPO2 = 0
+    WHERE ID_EQUIPO1 = equipoID AND CONCAT(FECHA, ' ', HORA) < fechaHoraActual AND PUNTOS_EQUIPO1 = -1;
+
+    -- Modificar los amistosos con ID_EQUIPO2 igual al ID del equipo eliminado
+    -- y cuya fecha y hora sean anteriores a la fecha y hora actual
+    UPDATE AMISTOSO
+    SET PUNTOS_EQUIPO1 = 0, PUNTOS_EQUIPO2 = 1
+    WHERE ID_EQUIPO2 = equipoID AND CONCAT(FECHA, ' ', HORA) < fechaHoraActual AND PUNTOS_EQUIPO2 = -1;
+
+    -- Modificar los amistosos con fecha posterior a la fecha y hora actual
+    -- donde el equipo eliminado es el ID_EQUIPO1
+    UPDATE AMISTOSO
+    SET ID_EQUIPO1 = NULL , DISPONIBLE = FALSE , ID_EQUIPO2 = NULL
+    WHERE ID_EQUIPO1 = equipoID AND CONCAT(FECHA, ' ', HORA) > fechaHoraActual;
+
+    -- Modificar los amistosos con fecha posterior a la fecha y hora actual
+    -- donde el equipo eliminado es el ID_EQUIPO2
+    UPDATE AMISTOSO
+    SET ID_EQUIPO2 = NULL , DISPONIBLE = TRUE
+    WHERE ID_EQUIPO2 = equipoID AND CONCAT(FECHA, ' ', HORA) > fechaHoraActual;
+
+	-- Eliminar participación del equipo en jornadas futuras
+    DELETE FROM JORNADA
+    WHERE (ID_EQUIPO1 = equipoID OR ID_EQUIPO2 = equipoID) AND FECHA > fechaHoraActual;
+
+	-- Marcar la competición como disponible si aún no ha comenzado y el equipo ha sido eliminado
+    UPDATE COMPETICION
+    SET DISPONIBLE = TRUE
+    WHERE ID IN (SELECT ID_COMPETICION FROM COMPETIDORES WHERE ID_EQUIPO = equipoID) 
+    AND FECHA_COMIENZO > fechaHoraActual;
+    
+    -- Eliminar participación del equipo en competiciones futuras
+    DELETE FROM COMPETIDORES
+    WHERE ID_EQUIPO = equipoID AND ID_COMPETICION IN (SELECT ID FROM COMPETICION WHERE FECHA_COMIENZO > fechaHoraActual);
+
+	
+    
+    -- Modificar el equipo para establecer ID_CAPITAN, ACTIVO y DISPONIBLE como NULL
+    UPDATE EQUIPO 
+    SET ID_CAPITAN = NULL, ACTIVO = FALSE, DISPONIBLE = FALSE 
+    WHERE NOMBRE = nombreEquipo;
+END//
+
+DELIMITER ;
+
+CREATE VIEW VISTA_LIGA AS
+SELECT
+    C.NOMBRE AS COMPETICION,
+    E.NOMBRE AS EQUIPO,
+    D.NOMBRE AS DEPORTE,
+    D.IMAGEN AS IMAGEN_DEPORTE,
+    COUNT(CASE WHEN J.PUNTOS_EQUIPO1 IS NOT NULL AND J.PUNTOS_EQUIPO2 IS NOT NULL
+           THEN J.ID END) AS PARTIDOS_JUGADOS,
+    COUNT(CASE WHEN (COALESCE(J.PUNTOS_EQUIPO1, 0) > COALESCE(J.PUNTOS_EQUIPO2, 0) AND J.ID_EQUIPO1 = E.ID) OR
+                    (COALESCE(J.PUNTOS_EQUIPO2, 0) > COALESCE(J.PUNTOS_EQUIPO1, 0) AND J.ID_EQUIPO2 = E.ID)
+               THEN 1 END) AS PARTIDOS_GANADOS,
+    COUNT(CASE WHEN J.PUNTOS_EQUIPO1 IS NOT NULL AND J.PUNTOS_EQUIPO2 IS NOT NULL AND (
+					COALESCE(J.PUNTOS_EQUIPO1, 0) = COALESCE(J.PUNTOS_EQUIPO2, 0) AND
+                    ((J.ID_EQUIPO1 = E.ID AND D.EMPATABLE = TRUE) OR
+                     (J.ID_EQUIPO2 = E.ID AND D.EMPATABLE = TRUE)))
+               THEN 1 END) AS PARTIDOS_EMPATADOS,
+    COUNT(CASE WHEN (COALESCE(J.PUNTOS_EQUIPO1, 0) < COALESCE(J.PUNTOS_EQUIPO2, 0) AND J.ID_EQUIPO1 = E.ID) OR
+                    (COALESCE(J.PUNTOS_EQUIPO2, 0) < COALESCE(J.PUNTOS_EQUIPO1, 0) AND J.ID_EQUIPO2 = E.ID)
+               THEN 1 END) AS PARTIDOS_PERDIDOS
+FROM EQUIPO E
+LEFT JOIN COMPETIDORES CO ON E.ID = CO.ID_EQUIPO
+LEFT JOIN COMPETICION C ON CO.ID_COMPETICION = C.ID
+LEFT JOIN JORNADA J ON C.ID = J.ID_COMPETICION AND (E.ID = J.ID_EQUIPO1 OR E.ID = J.ID_EQUIPO2)
+LEFT JOIN DEPORTE D ON C.ID_DEPORTE = D.ID
+WHERE C.TIPO = 0 -- Tipo 0 para competiciones de liga
+GROUP BY C.NOMBRE, E.NOMBRE, D.NOMBRE, D.IMAGEN, D.EMPATABLE
+ORDER BY PARTIDOS_GANADOS DESC, PARTIDOS_PERDIDOS ASC;
+
+
+
+
+
+CREATE VIEW FINALTORNEO AS
+SELECT 
+    J.ID AS JornadaID,
+    C.NOMBRE AS NombreCompeticion,
+    D.NOMBRE AS NombreDeporte,
+    D.IMAGEN AS ImagenDeporte,
+    J.FECHA,
+    J.EQUIPOSRESTANTES,
+    E1.NOMBRE AS Equipo1,
+    E1.IMAGEN AS FotoEquipo1,
+    E2.NOMBRE AS Equipo2,
+    E2.IMAGEN AS FotoEquipo2,
+    IFNULL(J.PUNTOS_EQUIPO1, -1) AS Puntos1,
+    IFNULL(J.PUNTOS_EQUIPO2, -1) AS Puntos2
+FROM 
+    JORNADA J
+JOIN (
+    SELECT 
+        ID_COMPETICION, 
+        MIN(EQUIPOSRESTANTES) AS MinEquiposRestantes
+    FROM 
+        JORNADA
+    GROUP BY 
+        ID_COMPETICION
+) MJ ON J.ID_COMPETICION = MJ.ID_COMPETICION AND J.EQUIPOSRESTANTES = MJ.MinEquiposRestantes
+JOIN 
+    COMPETICION C ON J.ID_COMPETICION = C.ID
+JOIN 
+    EQUIPO E1 ON J.ID_EQUIPO1 = E1.ID
+JOIN 
+    EQUIPO E2 ON J.ID_EQUIPO2 = E2.ID
+JOIN 
+    DEPORTE D ON C.ID_DEPORTE = D.ID
+WHERE 
+    C.TIPO = 1;
+
+
+
+
+CREATE OR REPLACE VIEW ESTADISTICAS_USUARIO_DEPORTE AS
+SELECT
+    D.NOMBRE AS DEPORTE,
+    U.USUARIO AS USUARIO,
+    MAX(E.NOMBRE) AS EQUIPO,  
+    MAX(E.IMAGEN) AS ESCUDO ,
+    COUNT(DISTINCT JI.ID) AS INFORMALES,
+    COUNT(DISTINCT A.ID) AS AMISTOSOS,
+    COUNT(DISTINCT MC.ID) AS COMPETICIONES,
+    -- COUNT(DISTINCT GC.ID) AS GESTIONES,
+    COUNT(DISTINCT CASE WHEN C.ID_EQUIPO_GANADOR = E.ID AND MC.ID IS NOT NULL THEN C.ID END) AS TROFEOS,
+    MAX(CASE WHEN R.NOMBRE = 'Administrador' THEN true ELSE false END) AS TIENE_ADMINISTRADOR
+FROM USUARIO U
+LEFT JOIN INSCRIPCION I ON U.ID = I.ID_USUARIO
+RIGHT JOIN DEPORTE D ON I.ID_DEPORTE = D.ID
+LEFT JOIN MIEMBROSEQUIPO ME ON ME.ID_MIEMBRO = U.ID
+LEFT JOIN EQUIPO E ON E.ID = ME.ID_EQUIPO AND D.ID = E.ID_DEPORTE
+LEFT JOIN INFORMAL PI ON PI.ID_DEPORTE = D.ID 
+LEFT JOIN JUGADORESINFORMAL JI ON JI.ID_USUARIO = U.ID AND JI.ID_INFORMAL = PI.ID
+LEFT JOIN AMISTOSO A ON (E.ID = A.ID_EQUIPO1 OR E.ID = A.ID_EQUIPO2) AND D.ID = A.ID_DEPORTE
+LEFT JOIN COMPETICION C ON C.ID_DEPORTE = D.ID 
+LEFT JOIN COMPETIDORES CO ON CO.ID_COMPETICION = C.ID AND CO.ID_EQUIPO = E.ID
+LEFT JOIN MIEMBROSCOMPETICION MC ON CO.ID = MC.ID_COMPETIDORES
+LEFT JOIN INSCRIPCION IR ON U.ID = IR.ID_USUARIO
+LEFT JOIN ROL R ON IR.ID_ROL = R.ID AND R.NOMBRE = 'Administrador'
+GROUP BY  D.ID, U.ID;
+
+
+-- Poblacion
+INSERT INTO DEPORTE (NOMBRE,IMAGEN, NUMEROJUGADORES, DESCRIPCION,EMPATABLE, SOLICITUD) 
+VALUES  
+    ('Ajedrez', 1, 1, 'El ajedrez es un juego de estrategia para dos jugadores en un tablero de 64 casillas, donde el objetivo es poner al rey del oponente en jaque mate. Cada jugador controla un conjunto de 16 piezas con movimientos especificos.',1, 0),
+    ('Tenis', 1, 1, 'El tenis es un deporte de raqueta que se juega individualmente (individuales) o entre dos parejas (dobles). El objetivo es marcar puntos al hacer que la pelota rebote en el suelo del lado opuesto de la pista y que el oponente no pueda devolverla correctamente.',0, 1),
+    ('Padel', 1, 2, 'El padel es un deporte de raqueta y pelota que se juega en parejas. Se practica en una pista mas pequeña y rodeada por paredes de cristal. El objetivo es marcar puntos haciendo que la pelota rebote en la pared antes de cruzar la red. Se permite que la pelota toque la pared en cualquier momento, añadiendo elementos estrategicos al juego.',0, 0),
+    ('Boxeo', 1, 1, 'El boxeo es un deporte de combate en el que dos participantes, conocidos como boxeadores, se enfrentan entre si lanzando golpes con los puños con el objetivo de debilitar y vencer al oponente.',1, 1),
+    ('Billar',   1, 1, 'El billar es un juego que se juega en una mesa cubierta con un paño y rodeada por bandas elasticas. El objetivo es golpear bolas con un taco para hacer que estas entren en los agujeros distribuidos en la mesa, siguiendo reglas especificas.',0, 0);
+
+
+INSERT INTO USUARIO (USUARIO, CONTRASENA, NOMBRE, DNI, FECHANACIMIENTO) 
+VALUES  ("javi", "6e89996fccb6f42b37b173f362194d498f34092696528a3ea26289371058ce18", "Javier Rodriguez", "20604505R", "2002-06-15"),
+		("dani", "d37c5e7961d0ed500ecf0475346027cf2d7010b7083c411f953936b0e38b1ab2", "Daniel Gil", "99540152Q", "1990-11-10"),
+        ("pepe", "7c9e7c1494b2684ab7c19d6aff737e460fa9e98d5a234da1310c97ddf5691834", "Jose Sanchez", "27526738Q", "2000-08-25"),
+        ("maria", "94aec9fbed989ece189a7e172c9cf41669050495152bc4c1dbf2a38d7fd85627", "Maria Rodriguez", "40736481P", "1998-07-05"),
+        ("manuel", "cca457407f24b80c72d89dd061837112cb99a0aa050c155514b320b7aaffe95c", "Manuel Molina", "36437663M", "1993-04-15"),
+        ("zaira", "9485b6f2530a1b5b5d2f07effed84fbe58d87d6120ff08a1b2c74777c980add4", "Zaira Leal", "83134046V", "2002-07-31"),
+        ("sergio", "36033babfb48ec64e197c97fb40d65e6c79f81e04c61aecccef3009e01645ab8d", "Sergio Sanchez", "86928181A", "1994-01-30"),
+        ("juan", "ed08c290d7e22f7bb324b15cbadce35b0b348564fd2d5f95752388d86d71bcca", "Juan Alberto", "93163436G", "1988-06-08");
+
+CALL INSCRIBIRUSUARIO("javi","Ajedrez");
+CALL INSCRIBIRUSUARIO("javi","Billar");
+CALL INSCRIBIRUSUARIO("javi","Padel");
+
+CALL INSCRIBIRUSUARIO("dani","Ajedrez");
+CALL INSCRIBIRUSUARIO("dani","Billar");
+CALL INSCRIBIRUSUARIO("dani","Padel");
+
+CALL INSCRIBIRUSUARIO("pepe","Ajedrez");
+CALL INSCRIBIRUSUARIO("pepe","Billar");
+CALL INSCRIBIRUSUARIO("pepe","Padel");
+
+CALL INSCRIBIRUSUARIO("maria","Ajedrez");
+CALL INSCRIBIRUSUARIO("maria","Billar");
+CALL INSCRIBIRUSUARIO("maria","Padel");
+
+CALL INSCRIBIRUSUARIO("manuel","Ajedrez");
+CALL INSCRIBIRUSUARIO("manuel","Billar");
+CALL INSCRIBIRUSUARIO("manuel","Padel");
+
+CALL INSCRIBIRUSUARIO("zaira","Ajedrez");
+CALL INSCRIBIRUSUARIO("zaira","Billar");
+CALL INSCRIBIRUSUARIO("zaira","Padel");
+
+CALL INSCRIBIRUSUARIO("sergio","Ajedrez");
+CALL INSCRIBIRUSUARIO("sergio","Billar");
+CALL INSCRIBIRUSUARIO("sergio","Padel");
+
+CALL INSCRIBIRUSUARIO("juan","Ajedrez");
+CALL INSCRIBIRUSUARIO("juan","Billar");
+CALL INSCRIBIRUSUARIO("juan","Padel");
+
+-- Equipos de Ajedrez
+CALL AGREGAR_EQUIPO("Jaque", (SELECT ID FROM DEPORTE WHERE NOMBRE = "Ajedrez"), (SELECT ID FROM USUARIO WHERE USUARIO = "javi"), 1,'Cadiz',36.533479891042454, -6.295738823609933);
+CALL AGREGAR_EQUIPO("Alfil Chapucero", (SELECT ID FROM DEPORTE WHERE NOMBRE = "Ajedrez"), (SELECT ID FROM USUARIO WHERE USUARIO = "juan"), 1,'Puerto Real',36.531670804863616, -6.1903373356896445);
+CALL AGREGAR_EQUIPO("Matarreyes", (SELECT ID FROM DEPORTE WHERE NOMBRE = "Ajedrez"), (SELECT ID FROM USUARIO WHERE USUARIO = "maria"), 1,'Cadiz',36.51920705876183, -6.2769766918700824);
+CALL AGREGAR_EQUIPO("Peon de obra", (SELECT ID FROM DEPORTE WHERE NOMBRE = "Ajedrez"), (SELECT ID FROM USUARIO WHERE USUARIO = "dani"), 1,'San Fernando',36.473623587997515, -6.203929457804815);
+
+-- Equipos de Padel
+CALL AGREGAR_EQUIPO("Palaso", (SELECT ID FROM DEPORTE WHERE NOMBRE = "Padel"), (SELECT ID FROM USUARIO WHERE USUARIO = "manuel"), 1,'Cadiz',36.533479891042454, -6.295738823609933);
+CALL AGREGAR_EQUIPO("La casa de padel", (SELECT ID FROM DEPORTE WHERE NOMBRE = "Padel"), (SELECT ID FROM USUARIO WHERE USUARIO = "maria"), 1,'Puerto Real',36.531670804863616, -6.1903373356896445);
+CALL AGREGAR_EQUIPO("Campearredes", (SELECT ID FROM DEPORTE WHERE NOMBRE = "Padel"), (SELECT ID FROM USUARIO WHERE USUARIO = "zaira"), 1,'Cadiz',36.51920705876183, -6.2769766918700824);
+
+-- Equipos de Billar
+CALL AGREGAR_EQUIPO("Bola 8", (SELECT ID FROM DEPORTE WHERE NOMBRE = "Billar"), (SELECT ID FROM USUARIO WHERE USUARIO = "javi"), 1,'Cadiz',36.51679448893167, -6.274058138043884);
+CALL AGREGAR_EQUIPO("Taco Tactico", (SELECT ID FROM DEPORTE WHERE NOMBRE = "Billar"), (SELECT ID FROM USUARIO WHERE USUARIO = "sergio"), 1,'Cadiz',36.50265263674447, -6.273140878269935);
+CALL AGREGAR_EQUIPO("Carambola", (SELECT ID FROM DEPORTE WHERE NOMBRE = "Billar"), (SELECT ID FROM USUARIO WHERE USUARIO = "pepe"), 1,'Puerto Real',36.52698038351389, -6.175994728315181);
+CALL AGREGAR_EQUIPO("Bolas gordas", (SELECT ID FROM DEPORTE WHERE NOMBRE = "Billar"), (SELECT ID FROM USUARIO WHERE USUARIO = "manuel"), 1,'Puerto Real',36.52698038351389, -6.175994728315181);
+
+INSERT INTO  MIEMBROSEQUIPO (ID_EQUIPO, ID_MIEMBRO) VALUES 
+	((SELECT ID FROM EQUIPO WHERE NOMBRE = "Matarreyes"),(SELECT ID FROM USUARIO WHERE USUARIO = "manuel")),
+    ((SELECT ID FROM EQUIPO WHERE NOMBRE = "Peon de obra"),(SELECT ID FROM USUARIO WHERE USUARIO = "sergio")),
+    ((SELECT ID FROM EQUIPO WHERE NOMBRE = "Campearredes"),(SELECT ID FROM USUARIO WHERE USUARIO = "javi")),
+    ((SELECT ID FROM EQUIPO WHERE NOMBRE = "Palaso"),(SELECT ID FROM USUARIO WHERE USUARIO = "dani")),
+    ((SELECT ID FROM EQUIPO WHERE NOMBRE = "La casa de padel"),(SELECT ID FROM USUARIO WHERE USUARIO = "sergio")),
+    ((SELECT ID FROM EQUIPO WHERE NOMBRE = "Campearredes"),(SELECT ID FROM USUARIO WHERE USUARIO = "juan")),
+    ((SELECT ID FROM EQUIPO WHERE NOMBRE = "Taco Tactico"),(SELECT ID FROM USUARIO WHERE USUARIO = "dani")),
+    ((SELECT ID FROM EQUIPO WHERE NOMBRE = "Bola 8"),(SELECT ID FROM USUARIO WHERE USUARIO = "maria"));
+    
+CALL ACTUALIZAREQUIPO('Matarreyes');
+CALL ACTUALIZAREQUIPO('Peon de obra');
+CALL ACTUALIZAREQUIPO('Campearredes');
+CALL ACTUALIZAREQUIPO('Palaso');
+CALL ACTUALIZAREQUIPO('La casa de padel');
+CALL ACTUALIZAREQUIPO('Taco Tactico');
+CALL ACTUALIZAREQUIPO('Bola 8');
+
+
+INSERT INTO COMPETICION (NOMBRE, ID_DEPORTE, NEQUIPOS, ID_EQUIPO_GANADOR, LOCALIDAD, ID_CREADOR, FECHA_COMIENZO, TIPO, LATITUD, LONGITUD)
+VALUES
+    ("Torneos Rey de los Tableros", (SELECT ID FROM DEPORTE WHERE NOMBRE = "Ajedrez"), 2,  NULL, "Cadiz", (SELECT ID FROM USUARIO WHERE USUARIO = "pepe"), '2024-02-10', 1, 36.51974334790344, -6.281675599016276),
+    ("Torneo Maestros del Ajedrez", (SELECT ID FROM DEPORTE WHERE NOMBRE = "Ajedrez"), 4,  NULL, "San Fernando", (SELECT ID FROM USUARIO WHERE USUARIO = "pepe"), '2024-03-20', 1, 36.45479787666258, -6.213671014967329),
+    ("Copa del Enroque", (SELECT ID FROM DEPORTE WHERE NOMBRE = "Ajedrez"), 2,  NULL, "Cadiz", (SELECT ID FROM USUARIO WHERE USUARIO = "pepe"), '2024-03-10', 1, 36.51419077232406, -6.274116632563712),
+    ("Liga Duelo de Caballos", (SELECT ID FROM DEPORTE WHERE NOMBRE = "Ajedrez"), 4,  NULL, "Cadiz", (SELECT ID FROM USUARIO WHERE USUARIO = "pepe"), '2024-03-10', 0, 36.52638501861668, -6.287655911649253),
+    
+    ("Copa del Rebote", (SELECT ID FROM DEPORTE WHERE NOMBRE = "Padel"), 2,  NULL, "Cadiz", (SELECT ID FROM USUARIO WHERE USUARIO = "pepe"), '2024-03-23', 1, 36.53162332731856, -6.295642043396468),
+    ("Torneo de Raquetazos", (SELECT ID FROM DEPORTE WHERE NOMBRE = "Padel"), 2,  NULL, "Puerto Real", (SELECT ID FROM USUARIO WHERE USUARIO = "pepe"), '2024-03-11', 1, 36.52772689550345, -6.181032548518676), 
+    
+    ("Torneo Clásico del Billar", (SELECT ID FROM DEPORTE WHERE NOMBRE = "Billar"), 4,  NULL, "Cadiz", (SELECT ID FROM USUARIO WHERE USUARIO = "pepe"), '2024-01-10', 1, 36.53421996425722, -6.29870648942084),
+    ("Torneo de los Golpes Maestros", (SELECT ID FROM DEPORTE WHERE NOMBRE = "Billar"), 2,  NULL, "Cadiz", (SELECT ID FROM USUARIO WHERE USUARIO = "pepe"), '2024-02-11', 1, 36.531474092732324, -6.300359432944864),
+    ("Liga Billar primavera 2023", (SELECT ID FROM DEPORTE WHERE NOMBRE = "Billar"), 4,  NULL, "San Fernando", (SELECT ID FROM USUARIO WHERE USUARIO = "pepe"), '2024-03-02', 0, 36.47288480824037, -6.193128851398825);
+
+INSERT INTO COMPETIDORES (ID_COMPETICION, ID_EQUIPO) VALUES
+    ((SELECT ID FROM COMPETICION WHERE NOMBRE = "Torneos Rey de los Tableros"), (SELECT ID FROM EQUIPO WHERE NOMBRE = "Jaque")),
+    ((SELECT ID FROM COMPETICION WHERE NOMBRE = "Torneos Rey de los Tableros"), (SELECT ID FROM EQUIPO WHERE NOMBRE = "Alfil Chapucero")),
+    ((SELECT ID FROM COMPETICION WHERE NOMBRE = "Torneo Maestros del Ajedrez"), (SELECT ID FROM EQUIPO WHERE NOMBRE = "Jaque")),
+    ((SELECT ID FROM COMPETICION WHERE NOMBRE = "Torneo Maestros del Ajedrez"), (SELECT ID FROM EQUIPO WHERE NOMBRE = "Alfil Chapucero")),
+    ((SELECT ID FROM COMPETICION WHERE NOMBRE = "Torneo Maestros del Ajedrez"), (SELECT ID FROM EQUIPO WHERE NOMBRE = "Matarreyes")),
+    ((SELECT ID FROM COMPETICION WHERE NOMBRE = "Torneo Maestros del Ajedrez"), (SELECT ID FROM EQUIPO WHERE NOMBRE = "Peon de obra")),
+    ((SELECT ID FROM COMPETICION WHERE NOMBRE = "Copa del Enroque"), (SELECT ID FROM EQUIPO WHERE NOMBRE = "Jaque")),
+    ((SELECT ID FROM COMPETICION WHERE NOMBRE = "Copa del Enroque"), (SELECT ID FROM EQUIPO WHERE NOMBRE = "Peon de obra")),
+    ((SELECT ID FROM COMPETICION WHERE NOMBRE = "Liga Duelo de Caballos"), (SELECT ID FROM EQUIPO WHERE NOMBRE = "Jaque")),
+    ((SELECT ID FROM COMPETICION WHERE NOMBRE = "Liga Duelo de Caballos"), (SELECT ID FROM EQUIPO WHERE NOMBRE = "Alfil Chapucero")),
+    ((SELECT ID FROM COMPETICION WHERE NOMBRE = "Liga Duelo de Caballos"), (SELECT ID FROM EQUIPO WHERE NOMBRE = "Peon de obra")),
+    ((SELECT ID FROM COMPETICION WHERE NOMBRE = "Liga Duelo de Caballos"), (SELECT ID FROM EQUIPO WHERE NOMBRE = "Matarreyes")),
+    
+    ((SELECT ID FROM COMPETICION WHERE NOMBRE = "Copa del Rebote"), (SELECT ID FROM EQUIPO WHERE NOMBRE = "Palaso")),
+    ((SELECT ID FROM COMPETICION WHERE NOMBRE = "Copa del Rebote"), (SELECT ID FROM EQUIPO WHERE NOMBRE = "La casa de padel")),
+    ((SELECT ID FROM COMPETICION WHERE NOMBRE = "Torneo de Raquetazos"), (SELECT ID FROM EQUIPO WHERE NOMBRE = "Palaso")),
+    ((SELECT ID FROM COMPETICION WHERE NOMBRE = "Torneo de Raquetazos"), (SELECT ID FROM EQUIPO WHERE NOMBRE = "Campearredes")),
+    
+    ((SELECT ID FROM COMPETICION WHERE NOMBRE = "Torneo Clásico del Billar"), (SELECT ID FROM EQUIPO WHERE NOMBRE = "Bola 8")),
+    ((SELECT ID FROM COMPETICION WHERE NOMBRE = "Torneo Clásico del Billar"), (SELECT ID FROM EQUIPO WHERE NOMBRE = "Taco Tactico")),
+    ((SELECT ID FROM COMPETICION WHERE NOMBRE = "Torneo Clásico del Billar"), (SELECT ID FROM EQUIPO WHERE NOMBRE = "Carambola")),
+    ((SELECT ID FROM COMPETICION WHERE NOMBRE = "Torneo Clásico del Billar"), (SELECT ID FROM EQUIPO WHERE NOMBRE = "Bolas gordas")),
+    ((SELECT ID FROM COMPETICION WHERE NOMBRE = "Torneo de los Golpes Maestros"), (SELECT ID FROM EQUIPO WHERE NOMBRE = "Palaso")),
+    ((SELECT ID FROM COMPETICION WHERE NOMBRE = "Torneo de los Golpes Maestros"), (SELECT ID FROM EQUIPO WHERE NOMBRE = "Bolas gordas")),
+    ((SELECT ID FROM COMPETICION WHERE NOMBRE = "Liga Billar primavera 2023"), (SELECT ID FROM EQUIPO WHERE NOMBRE = "Bola 8")),
+    ((SELECT ID FROM COMPETICION WHERE NOMBRE = "Liga Billar primavera 2023"), (SELECT ID FROM EQUIPO WHERE NOMBRE = "Taco Tactico")),
+    ((SELECT ID FROM COMPETICION WHERE NOMBRE = "Liga Billar primavera 2023"), (SELECT ID FROM EQUIPO WHERE NOMBRE = "Carambola")),
+    ((SELECT ID FROM COMPETICION WHERE NOMBRE = "Liga Billar primavera 2023"), (SELECT ID FROM EQUIPO WHERE NOMBRE = "Bolas gordas"));
+
+
+CALL VerificarCompetencia('Torneos Rey de los Tableros');
+CALL VerificarCompetencia('Torneo Maestros del Ajedrez');
+CALL VerificarCompetencia('Copa del Enroque');
+CALL VerificarCompetencia('Liga Duelo de Caballos');
+CALL VerificarCompetencia('Copa del Rebote');
+CALL VerificarCompetencia('Torneo de Raquetazos');
+CALL VerificarCompetencia('Torneo Clásico del Billar');
+CALL VerificarCompetencia('Torneo de los Golpes Maestros');
+CALL VerificarCompetencia('Liga Billar primavera 2023');
+
+INSERT INTO JORNADA (ID_COMPETICION, EQUIPOSRESTANTES, FECHA, HORA, LOCALIZACION, ID_EQUIPO1, ID_EQUIPO2, PUNTOS_EQUIPO1, PUNTOS_EQUIPO2, LATITUD, LONGITUD) VALUES
+	((SELECT ID FROM COMPETICION WHERE NOMBRE = "Torneos Rey de los Tableros"), 	2, '2024-02-10', '7:00', (SELECT LOCALIZACION FROM COMPETICION WHERE NOMBRE = "Torneos Rey de los Tableros"), 	(SELECT ID FROM EQUIPO WHERE NOMBRE = "Jaque"), 		(SELECT ID FROM EQUIPO WHERE NOMBRE = "Alfil Chapucero"), 	1, 0, (SELECT LATITUD FROM COMPETICION WHERE NOMBRE = "Torneos Rey de los Tableros"), (SELECT LONGITUD FROM COMPETICION WHERE NOMBRE = "Torneos Rey de los Tableros")),
+    
+    ((SELECT ID FROM COMPETICION WHERE NOMBRE = "Torneo Maestros del Ajedrez"), 	4, '2024-03-20', '7:00', (SELECT LOCALIZACION FROM COMPETICION WHERE NOMBRE = "Torneo Maestros del Ajedrez"), 	(SELECT ID FROM EQUIPO WHERE NOMBRE = "Jaque"), 	(SELECT ID FROM EQUIPO WHERE NOMBRE = "Alfil Chapucero"), 		1, 0, (SELECT LATITUD FROM COMPETICION WHERE NOMBRE = "Torneo Maestros del Ajedrez"), (SELECT LONGITUD FROM COMPETICION WHERE NOMBRE = "Torneo Maestros del Ajedrez")),
+    ((SELECT ID FROM COMPETICION WHERE NOMBRE = "Torneo Maestros del Ajedrez"), 	4, '2024-03-20', '8:00', (SELECT LOCALIZACION FROM COMPETICION WHERE NOMBRE = "Torneo Maestros del Ajedrez"), 	(SELECT ID FROM EQUIPO WHERE NOMBRE = "Matarreyes"), 	(SELECT ID FROM EQUIPO WHERE NOMBRE = "Peon de obra"), 		1, 0, (SELECT LATITUD FROM COMPETICION WHERE NOMBRE = "Torneo Maestros del Ajedrez"), (SELECT LONGITUD FROM COMPETICION WHERE NOMBRE = "Torneo Maestros del Ajedrez")),
+    ((SELECT ID FROM COMPETICION WHERE NOMBRE = "Torneo Maestros del Ajedrez"), 	2, '2024-03-27', '7:00', (SELECT LOCALIZACION FROM COMPETICION WHERE NOMBRE = "Torneo Maestros del Ajedrez"), 	(SELECT ID FROM EQUIPO WHERE NOMBRE = "Jaque"), 	(SELECT ID FROM EQUIPO WHERE NOMBRE = "Matarreyes"), 			1, 0, (SELECT LATITUD FROM COMPETICION WHERE NOMBRE = "Torneo Maestros del Ajedrez"), (SELECT LONGITUD FROM COMPETICION WHERE NOMBRE = "Torneo Maestros del Ajedrez")),
+    
+    ((SELECT ID FROM COMPETICION WHERE NOMBRE = "Copa del Enroque"), 				2, '2024-03-10', '7:00', (SELECT LOCALIZACION FROM COMPETICION WHERE NOMBRE = "Copa del Enroque"), 			(SELECT ID FROM EQUIPO WHERE NOMBRE = "Jaque"), 		(SELECT ID FROM EQUIPO WHERE NOMBRE = "Peon de obra"), 		1, 0, (SELECT LATITUD FROM COMPETICION WHERE NOMBRE = "Copa del Enroque"), (SELECT LONGITUD FROM COMPETICION WHERE NOMBRE = "Copa del Enroque")),
+    
+    ((SELECT ID FROM COMPETICION WHERE NOMBRE = "Liga Duelo de Caballos"), 			4, '2024-03-10', '7:00', (SELECT LOCALIZACION FROM COMPETICION WHERE NOMBRE = "Liga Duelo de Caballos"), 		(SELECT ID FROM EQUIPO WHERE NOMBRE = "Jaque"), 		(SELECT ID FROM EQUIPO WHERE NOMBRE = "Alfil Chapucero"), 	1, 0, (SELECT LATITUD FROM COMPETICION WHERE NOMBRE = "Liga Duelo de Caballos"), (SELECT LONGITUD FROM COMPETICION WHERE NOMBRE = "Liga Duelo de Caballos")),
+	((SELECT ID FROM COMPETICION WHERE NOMBRE = "Liga Duelo de Caballos"), 			4, '2024-03-10', '8:00', (SELECT LOCALIZACION FROM COMPETICION WHERE NOMBRE = "Liga Duelo de Caballos"), 		(SELECT ID FROM EQUIPO WHERE NOMBRE = "Jaque"), 		(SELECT ID FROM EQUIPO WHERE NOMBRE = "Peon de obra"), 	1, 0, (SELECT LATITUD FROM COMPETICION WHERE NOMBRE = "Liga Duelo de Caballos"), (SELECT LONGITUD FROM COMPETICION WHERE NOMBRE = "Liga Duelo de Caballos")),
+    ((SELECT ID FROM COMPETICION WHERE NOMBRE = "Liga Duelo de Caballos"), 			4, '2024-03-17', '7:00', (SELECT LOCALIZACION FROM COMPETICION WHERE NOMBRE = "Liga Duelo de Caballos"), 		(SELECT ID FROM EQUIPO WHERE NOMBRE = "Jaque"), 		(SELECT ID FROM EQUIPO WHERE NOMBRE = "Matarreyes"), 	1, 0, (SELECT LATITUD FROM COMPETICION WHERE NOMBRE = "Liga Duelo de Caballos"), (SELECT LONGITUD FROM COMPETICION WHERE NOMBRE = "Liga Duelo de Caballos")),
+    ((SELECT ID FROM COMPETICION WHERE NOMBRE = "Liga Duelo de Caballos"), 			4, '2024-03-17', '8:00', (SELECT LOCALIZACION FROM COMPETICION WHERE NOMBRE = "Liga Duelo de Caballos"), 		(SELECT ID FROM EQUIPO WHERE NOMBRE = "Matarreyes"), 		(SELECT ID FROM EQUIPO WHERE NOMBRE = "Alfil Chapucero"), 	1, 0, (SELECT LATITUD FROM COMPETICION WHERE NOMBRE = "Liga Duelo de Caballos"), (SELECT LONGITUD FROM COMPETICION WHERE NOMBRE = "Liga Duelo de Caballos")),
+    ((SELECT ID FROM COMPETICION WHERE NOMBRE = "Liga Duelo de Caballos"), 			4, '2024-03-24', '7:00', (SELECT LOCALIZACION FROM COMPETICION WHERE NOMBRE = "Liga Duelo de Caballos"), 		(SELECT ID FROM EQUIPO WHERE NOMBRE = "Peon de obra"), 		(SELECT ID FROM EQUIPO WHERE NOMBRE = "Alfil Chapucero"), 	0, 1, (SELECT LATITUD FROM COMPETICION WHERE NOMBRE = "Liga Duelo de Caballos"), (SELECT LONGITUD FROM COMPETICION WHERE NOMBRE = "Liga Duelo de Caballos")),
+    ((SELECT ID FROM COMPETICION WHERE NOMBRE = "Liga Duelo de Caballos"), 			4, '2024-03-24', '8:00', (SELECT LOCALIZACION FROM COMPETICION WHERE NOMBRE = "Liga Duelo de Caballos"), 		(SELECT ID FROM EQUIPO WHERE NOMBRE = "Matarreyes"), 		(SELECT ID FROM EQUIPO WHERE NOMBRE = "Peon de obra"), 	1, 0, (SELECT LATITUD FROM COMPETICION WHERE NOMBRE = "Liga Duelo de Caballos"), (SELECT LONGITUD FROM COMPETICION WHERE NOMBRE = "Liga Duelo de Caballos")),
+    
+    ((SELECT ID FROM COMPETICION WHERE NOMBRE = "Copa del Rebote"), 				2, '2024-03-23', '7:00', (SELECT LOCALIZACION FROM COMPETICION WHERE NOMBRE = "Copa del Rebote"), 				(SELECT ID FROM EQUIPO WHERE NOMBRE = "Palaso"), 		(SELECT ID FROM EQUIPO WHERE NOMBRE = "La casa de padel"), 	2, 1, (SELECT LATITUD FROM COMPETICION WHERE NOMBRE = "Copa del Rebote"), (SELECT LONGITUD FROM COMPETICION WHERE NOMBRE = "Copa del Rebote")),
+    
+    ((SELECT ID FROM COMPETICION WHERE NOMBRE = "Torneo de Raquetazos"), 			2, '2024-03-11', '7:00', (SELECT LOCALIZACION FROM COMPETICION WHERE NOMBRE = "Torneo de Raquetazos"), 		(SELECT ID FROM EQUIPO WHERE NOMBRE = "Palaso"), 		(SELECT ID FROM EQUIPO WHERE NOMBRE = "Campearredes"), 		0, 3, (SELECT LATITUD FROM COMPETICION WHERE NOMBRE = "Torneo de Raquetazos"), (SELECT LONGITUD FROM COMPETICION WHERE NOMBRE = "Torneo de Raquetazos")),
+    
+    ((SELECT ID FROM COMPETICION WHERE NOMBRE = "Torneo Clásico del Billar"), 		4, '2024-01-10', '7:00', (SELECT LOCALIZACION FROM COMPETICION WHERE NOMBRE = "Torneo Clásico del Billar"), 	(SELECT ID FROM EQUIPO WHERE NOMBRE = "Bola 8"), 		(SELECT ID FROM EQUIPO WHERE NOMBRE = "Taco Tactico"), 		1, 0, (SELECT LATITUD FROM COMPETICION WHERE NOMBRE = "Torneo Clásico del Billar"), (SELECT LONGITUD FROM COMPETICION WHERE NOMBRE = "Torneo Clásico del Billar")),
+    ((SELECT ID FROM COMPETICION WHERE NOMBRE = "Torneo Clásico del Billar"), 		4, '2024-01-10', '8:00', (SELECT LOCALIZACION FROM COMPETICION WHERE NOMBRE = "Torneo Clásico del Billar"), 	(SELECT ID FROM EQUIPO WHERE NOMBRE = "Carambola"), 		(SELECT ID FROM EQUIPO WHERE NOMBRE = "Bolas gordas"), 		0, 1, (SELECT LATITUD FROM COMPETICION WHERE NOMBRE = "Torneo Clásico del Billar"), (SELECT LONGITUD FROM COMPETICION WHERE NOMBRE = "Torneo Clásico del Billar")),
+    ((SELECT ID FROM COMPETICION WHERE NOMBRE = "Torneo Clásico del Billar"), 		2, '2024-01-17', '7:00', (SELECT LOCALIZACION FROM COMPETICION WHERE NOMBRE = "Torneo Clásico del Billar"), 	(SELECT ID FROM EQUIPO WHERE NOMBRE = "Bola 8"), 		(SELECT ID FROM EQUIPO WHERE NOMBRE = "Bolas gordas"), 		1, 0, (SELECT LATITUD FROM COMPETICION WHERE NOMBRE = "Torneo Clásico del Billar"), (SELECT LONGITUD FROM COMPETICION WHERE NOMBRE = "Torneo Clásico del Billar")),
+    
+    ((SELECT ID FROM COMPETICION WHERE NOMBRE = "Torneo de los Golpes Maestros"),	2, '2024-02-11', '7:00', (SELECT LOCALIZACION FROM COMPETICION WHERE NOMBRE = "Torneo de los Golpes Maestros"),(SELECT ID FROM EQUIPO WHERE NOMBRE = "Palaso"), 		(SELECT ID FROM EQUIPO WHERE NOMBRE = "La casa de padel"), 	1, 0, (SELECT LATITUD FROM COMPETICION WHERE NOMBRE = "Torneo de los Golpes Maestros"), (SELECT LONGITUD FROM COMPETICION WHERE NOMBRE = "Torneo de los Golpes Maestros")),
+
+    ((SELECT ID FROM COMPETICION WHERE NOMBRE = "Liga Billar primavera 2023"), 		4, '2024-03-02', '7:00', (SELECT LOCALIZACION FROM COMPETICION WHERE NOMBRE = "Liga Duelo de Caballos"), 		(SELECT ID FROM EQUIPO WHERE NOMBRE = "Bola 8"), 		(SELECT ID FROM EQUIPO WHERE NOMBRE = "Taco Tactico"), 	1, 0, (SELECT LATITUD FROM COMPETICION WHERE NOMBRE = "Liga Billar primavera 2023"), (SELECT LONGITUD FROM COMPETICION WHERE NOMBRE = "Liga Billar primavera 2023")),
+    ((SELECT ID FROM COMPETICION WHERE NOMBRE = "Liga Billar primavera 2023"), 		4, '2024-03-02', '8:00', (SELECT LOCALIZACION FROM COMPETICION WHERE NOMBRE = "Liga Duelo de Caballos"), 		(SELECT ID FROM EQUIPO WHERE NOMBRE = "Bola 8"), 		(SELECT ID FROM EQUIPO WHERE NOMBRE = "Carambola"), 	1, 0, (SELECT LATITUD FROM COMPETICION WHERE NOMBRE = "Liga Billar primavera 2023"), (SELECT LONGITUD FROM COMPETICION WHERE NOMBRE = "Liga Billar primavera 2023")),
+	((SELECT ID FROM COMPETICION WHERE NOMBRE = "Liga Billar primavera 2023"), 		4, '2024-03-09', '7:00', (SELECT LOCALIZACION FROM COMPETICION WHERE NOMBRE = "Liga Duelo de Caballos"), 		(SELECT ID FROM EQUIPO WHERE NOMBRE = "Bola 8"), 		(SELECT ID FROM EQUIPO WHERE NOMBRE = "Bolas gordas"), 	1, 0, (SELECT LATITUD FROM COMPETICION WHERE NOMBRE = "Liga Billar primavera 2023"), (SELECT LONGITUD FROM COMPETICION WHERE NOMBRE = "Liga Billar primavera 2023")),
+    ((SELECT ID FROM COMPETICION WHERE NOMBRE = "Liga Billar primavera 2023"), 		4, '2024-03-09', '8:00', (SELECT LOCALIZACION FROM COMPETICION WHERE NOMBRE = "Liga Duelo de Caballos"), 		(SELECT ID FROM EQUIPO WHERE NOMBRE = "Carambola"), 		(SELECT ID FROM EQUIPO WHERE NOMBRE = "Taco Tactico"), 	1, 0, (SELECT LATITUD FROM COMPETICION WHERE NOMBRE = "Liga Billar primavera 2023"), (SELECT LONGITUD FROM COMPETICION WHERE NOMBRE = "Liga Billar primavera 2023")),
+    ((SELECT ID FROM COMPETICION WHERE NOMBRE = "Liga Billar primavera 2023"), 		4, '2024-03-16', '7:00', (SELECT LOCALIZACION FROM COMPETICION WHERE NOMBRE = "Liga Duelo de Caballos"), 		(SELECT ID FROM EQUIPO WHERE NOMBRE = "Carambola"), 		(SELECT ID FROM EQUIPO WHERE NOMBRE = "Bolas gordas"), 	0, 1, (SELECT LATITUD FROM COMPETICION WHERE NOMBRE = "Liga Billar primavera 2023"), (SELECT LONGITUD FROM COMPETICION WHERE NOMBRE = "Liga Billar primavera 2023")),
+    ((SELECT ID FROM COMPETICION WHERE NOMBRE = "Liga Billar primavera 2023"), 		4, '2024-03-16', '8:00', (SELECT LOCALIZACION FROM COMPETICION WHERE NOMBRE = "Liga Duelo de Caballos"), 		(SELECT ID FROM EQUIPO WHERE NOMBRE = "Bolas gordas"), 		(SELECT ID FROM EQUIPO WHERE NOMBRE = "Taco Tactico"), 	1, 0, (SELECT LATITUD FROM COMPETICION WHERE NOMBRE = "Liga Billar primavera 2023"), (SELECT LONGITUD FROM COMPETICION WHERE NOMBRE = "Liga Billar primavera 2023"));
+
+
+UPDATE COMPETICION  SET RONDA = 0, ID_EQUIPO_GANADOR = (SELECT ID FROM EQUIPO WHERE NOMBRE = "Jaque") WHERE NOMBRE = "Torneos Rey de los Tableros";
+UPDATE COMPETICION  SET RONDA = 0, ID_EQUIPO_GANADOR = (SELECT ID FROM EQUIPO WHERE NOMBRE = "Jaque") WHERE NOMBRE = "Torneo Maestros del Ajedrez";
+UPDATE COMPETICION  SET RONDA = 0, ID_EQUIPO_GANADOR = (SELECT ID FROM EQUIPO WHERE NOMBRE = "Jaque") WHERE NOMBRE = "Copa del Enroque";
+UPDATE COMPETICION  SET RONDA = 0, ID_EQUIPO_GANADOR = (SELECT ID FROM EQUIPO WHERE NOMBRE = "Jaque") WHERE NOMBRE = "Liga Duelo de Caballos";
+UPDATE COMPETICION  SET RONDA = 0, ID_EQUIPO_GANADOR = (SELECT ID FROM EQUIPO WHERE NOMBRE = "Palaso") WHERE NOMBRE = "Copa del Rebote";
+UPDATE COMPETICION  SET RONDA = 0, ID_EQUIPO_GANADOR = (SELECT ID FROM EQUIPO WHERE NOMBRE = "Campearredes") WHERE NOMBRE = "Torneo de Raquetazos";
+UPDATE COMPETICION  SET RONDA = 0, ID_EQUIPO_GANADOR = (SELECT ID FROM EQUIPO WHERE NOMBRE = "Bola 8") WHERE NOMBRE = "Torneo Clásico del Billar";
+UPDATE COMPETICION  SET RONDA = 0, ID_EQUIPO_GANADOR = (SELECT ID FROM EQUIPO WHERE NOMBRE = "Palaso") WHERE NOMBRE = "Torneo de los Golpes Maestros";
+UPDATE COMPETICION  SET RONDA = 0, ID_EQUIPO_GANADOR = (SELECT ID FROM EQUIPO WHERE NOMBRE = "Bola 8") WHERE NOMBRE = "Liga Billar primavera 2023";
+
+
+INSERT INTO COMENTARIO (ID_NOTICIA, TEXTO, ID_USUARIO, FECHA, HORA, DENUNCIADO)
+VALUES 
+    ((SELECT ID FROM NOTICIA WHERE ID_COMPETICION = (SELECT ID FROM COMPETICION WHERE NOMBRE = "Torneos Rey de los Tableros")), "¡Gran partida estrategica!", (SELECT ID FROM USUARIO WHERE USUARIO = "javi"), '2024-02-11', CURTIME(), 0),
+    ((SELECT ID FROM NOTICIA WHERE ID_COMPETICION = (SELECT ID FROM COMPETICION WHERE NOMBRE = "Torneos Rey de los Tableros")), "Buena jugada por parte de ambos equipos", (SELECT ID FROM USUARIO WHERE USUARIO = "maria"), '2024-02-12', CURTIME(), 0),
+    ((SELECT ID FROM NOTICIA WHERE ID_COMPETICION = (SELECT ID FROM COMPETICION WHERE NOMBRE = "Torneos Rey de los Tableros")), "Tiembla Magnus Carlsen", (SELECT ID FROM USUARIO WHERE USUARIO = "pepe"), '2024-02-16', CURTIME(), 0),
+
+    ((SELECT ID FROM NOTICIA WHERE ID_COMPETICION = (SELECT ID FROM COMPETICION WHERE NOMBRE = "Torneo Maestros del Ajedrez")), "¡Increible torneo!", (SELECT ID FROM USUARIO WHERE USUARIO = "dani"), '2024-03-28', CURTIME(), 0),
+    ((SELECT ID FROM NOTICIA WHERE ID_COMPETICION = (SELECT ID FROM COMPETICION WHERE NOMBRE = "Torneo Maestros del Ajedrez")), "Esperando con ansias el proximo torneo", (SELECT ID FROM USUARIO WHERE USUARIO = "juan"), '2024-03-29', CURTIME(), 0),
+
+    ((SELECT ID FROM NOTICIA WHERE ID_COMPETICION = (SELECT ID FROM COMPETICION WHERE NOMBRE = "Copa del Enroque")), "Partida intensa en la Copa del Enroque", (SELECT ID FROM USUARIO WHERE USUARIO = "javi"), '2024-03-12', CURTIME(), 0),
+    ((SELECT ID FROM NOTICIA WHERE ID_COMPETICION = (SELECT ID FROM COMPETICION WHERE NOMBRE = "Copa del Enroque")), "Vaya aburrimiento de paartida", (SELECT ID FROM USUARIO WHERE USUARIO = "manuel"), '2024-03-15', CURTIME(), 0),
+	((SELECT ID FROM NOTICIA WHERE ID_COMPETICION = (SELECT ID FROM COMPETICION WHERE NOMBRE = "Copa del Enroque")), "¡Partidazo en la Copa del Enroque!", (SELECT ID FROM USUARIO WHERE USUARIO = "pepe"), '2024-03-18', CURTIME(), 0),
+    ((SELECT ID FROM NOTICIA WHERE ID_COMPETICION = (SELECT ID FROM COMPETICION WHERE NOMBRE = "Copa del Enroque")), "¡Que emocionante ver a estos equipos competir!", (SELECT ID FROM USUARIO WHERE USUARIO = "zaira"), '2024-03-20', CURTIME(), 0),
+
+    ((SELECT ID FROM NOTICIA WHERE ID_COMPETICION = (SELECT ID FROM COMPETICION WHERE NOMBRE = "Liga Duelo de Caballos")), "Gran ambiente en la Liga Duelo de Caballos", (SELECT ID FROM USUARIO WHERE USUARIO = "sergio"), '2024-03-25', CURTIME(), 0),
+    ((SELECT ID FROM NOTICIA WHERE ID_COMPETICION = (SELECT ID FROM COMPETICION WHERE NOMBRE = "Liga Duelo de Caballos")), "No me esperaba este ganador", (SELECT ID FROM USUARIO WHERE USUARIO = "javi"), '2024-03-30', CURTIME(), 0),
+
+    ((SELECT ID FROM NOTICIA WHERE ID_COMPETICION = (SELECT ID FROM COMPETICION WHERE NOMBRE = "Copa del Rebote")), "¡Asombrosas jugadas en la Copa del Rebote!", (SELECT ID FROM USUARIO WHERE USUARIO = "pepe"), '2024-03-24', CURTIME(), 0),
+    ((SELECT ID FROM NOTICIA WHERE ID_COMPETICION = (SELECT ID FROM COMPETICION WHERE NOMBRE = "Copa del Rebote")), "Claro ganador de la competicion", (SELECT ID FROM USUARIO WHERE USUARIO = "maria"), '2024-03-27', CURTIME(), 0),
+ 
+	((SELECT ID FROM NOTICIA WHERE ID_COMPETICION = (SELECT ID FROM COMPETICION WHERE NOMBRE = "Torneo Clásico del Billar")), "¡Que partida tan intensa! Estos jugadores son unos monstruos", (SELECT ID FROM USUARIO WHERE USUARIO = "zaira"), '2024-01-18', CURTIME(), 0),
+    ((SELECT ID FROM NOTICIA WHERE ID_COMPETICION = (SELECT ID FROM COMPETICION WHERE NOMBRE = "Torneo Clásico del Billar")), "Son malisimos", (SELECT ID FROM USUARIO WHERE USUARIO = "juan"), '2024-01-27', CURTIME(), 0),
+
+    ((SELECT ID FROM NOTICIA WHERE ID_COMPETICION = (SELECT ID FROM COMPETICION WHERE NOMBRE = "Torneo de Raquetazos")), "¡Que aburrido esta este torneo! Los jugadores ni siquiera estan esforzandose", (SELECT ID FROM USUARIO WHERE USUARIO = "manuel"), '2024-03-19', CURTIME(), 0),
+    ((SELECT ID FROM NOTICIA WHERE ID_COMPETICION = (SELECT ID FROM COMPETICION WHERE NOMBRE = "Torneo de Raquetazos")), "Que aprendan a coger la pala primero", (SELECT ID FROM USUARIO WHERE USUARIO = "dani"), '2024-03-18', CURTIME(), 0),
+
+    ((SELECT ID FROM NOTICIA WHERE ID_COMPETICION = (SELECT ID FROM COMPETICION WHERE NOMBRE = "Liga Billar primavera 2023")), "¡Qué  emocion en el Torneo de los Golpes Maestros!", (SELECT ID FROM USUARIO WHERE USUARIO = "dani"), '2024-03-17', CURTIME(), 0),
+    ((SELECT ID FROM NOTICIA WHERE ID_COMPETICION = (SELECT ID FROM COMPETICION WHERE NOMBRE = "Liga Billar primavera 2023")), "Se ha demostrado quien era mejor", (SELECT ID FROM USUARIO WHERE USUARIO = "juan"), '2024-03-26', CURTIME(), 0);
+
+
+
+INSERT INTO INFORMAL (FECHA, HORA, LOCALIZACION, ID_DEPORTE, LATITUD, LONGITUD, DISPONIBLE)
+VALUES 
+    ('2024-01-05', '15:00', 'C. Posadilla, 6T, 11005 Cádiz', (SELECT ID FROM DEPORTE WHERE NOMBRE = 'Ajedrez'), 36.529, -6.293, TRUE),
+    ('2024-01-10', '16:30', 'C. Buenos Aires, 9, 11003 Cádiz', (SELECT ID FROM DEPORTE WHERE NOMBRE = 'Ajedrez'), 36.535357021084685, -6.297991645731694, TRUE),
+    ('2024-01-15', '14:00', 'Brunete, 1, 11007 Cádiz', (SELECT ID FROM DEPORTE WHERE NOMBRE = 'Ajedrez'), 36.522250637535656, -6.284100758025777, TRUE),
+    ('2024-01-20', '17:00', 'Zona Franca, Vía Noruega, 11011 Cádiz', (SELECT ID FROM DEPORTE WHERE NOMBRE = 'Ajedrez'), 36.5022828849605, -6.2661466316658565, TRUE),
+    ('2024-01-25', '18:30', 'Rosario, 50, 11510 Puerto Real, Cádiz', (SELECT ID FROM DEPORTE WHERE NOMBRE = 'Ajedrez'), 36.531004356736275, -6.193699884050333, TRUE),
+    
+    ('2024-03-05', '11:00', 'C. Macedonia, 17, 11011 Cádiz', (SELECT ID FROM DEPORTE WHERE NOMBRE = 'Padel'), 36.50576339821291, -6.266222257545067, TRUE),
+    ('2024-03-10', '13:00', 'Av. Ana de Viya, 15, 11009 Cádiz', (SELECT ID FROM DEPORTE WHERE NOMBRE = 'Padel'), 36.508627985607674, -6.277896756703929, TRUE),
+    ('2024-03-15', '15:00', 'Calle Dr. Sánchez Bish, 53, 11510 Puerto Real, Cádiz', (SELECT ID FROM DEPORTE WHERE NOMBRE = 'Padel'), 36.53080759082946, -6.179507011971245, TRUE),
+    ('2024-03-20', '17:00', 'C. Ferrocarril, S/N, 11100 San Fernando, Cádiz', (SELECT ID FROM DEPORTE WHERE NOMBRE = 'Padel'), 36.47620609457004, -6.200433275623712, TRUE),
+    ('2024-03-25', '19:00', 'C. Hermanas Carmelitas, 20, 11100 San Fernando, Cádiz', (SELECT ID FROM DEPORTE WHERE NOMBRE = 'Padel'), 36.44977225642468, -6.215563047820482, TRUE),
+    
+    ('2024-02-03', '09:00', 'Vía Noruega, 3, 11011 Cádiz', (SELECT ID FROM DEPORTE WHERE NOMBRE = 'Billar'), 36.50328155295161, -6.265547978873376, TRUE),
+    ('2024-02-09', '11:00', 'C. Gas, 1, 11008 Cádiz', (SELECT ID FROM DEPORTE WHERE NOMBRE = 'Billar'), 36.5153734011688, -6.27963466559987, TRUE),
+    ('2024-02-16', '13:00', 'C. Plutón, 36-26, 11510 Puerto Real, Cádiz', (SELECT ID FROM DEPORTE WHERE NOMBRE = 'Billar'), 36.53562962728435, -6.18915887486427, TRUE),
+    ('2024-02-21', '15:00', 'C. Hermanas Carmelitas, 20, 11100 San Fernando, Cádiz', (SELECT ID FROM DEPORTE WHERE NOMBRE = 'Billar'), 36.44977225642468, -6.215563047820482, TRUE),
+    ('2024-02-26', '17:00', 'Av. Al-Andalus, 1B, 11100 San Fernando, Cádiz', (SELECT ID FROM DEPORTE WHERE NOMBRE = 'Billar'), 36.46004629134453, -6.208587310142809, TRUE);
+
+-- Insertar jugadores informales para los partidos en un solo comando para JUGADORESINFORMAL
+INSERT INTO JUGADORESINFORMAL (ID_INFORMAL, ID_USUARIO)
+VALUES 
+    (1, (SELECT ID FROM USUARIO WHERE USUARIO = 'javi' LIMIT 1)),
+    (1,(SELECT ID FROM USUARIO WHERE USUARIO = 'dani' LIMIT 1)),
+    (2,(SELECT ID FROM USUARIO WHERE USUARIO = 'pepe' LIMIT 1)),
+    (2,(SELECT ID FROM USUARIO WHERE USUARIO = 'maria' LIMIT 1)),
+    (3,(SELECT ID FROM USUARIO WHERE USUARIO = 'javi' LIMIT 1)),
+    (3,(SELECT ID FROM USUARIO WHERE USUARIO = 'zaira' LIMIT 1)),
+    (4,(SELECT ID FROM USUARIO WHERE USUARIO = 'sergio' LIMIT 1)),
+    (4,(SELECT ID FROM USUARIO WHERE USUARIO = 'juan' LIMIT 1)),
+    (5,(SELECT ID FROM USUARIO WHERE USUARIO = 'javi' LIMIT 1)),
+    (5,(SELECT ID FROM USUARIO WHERE USUARIO = 'pepe' LIMIT 1)),
+    
+    (6,(SELECT ID FROM USUARIO WHERE USUARIO = 'maria' LIMIT 1)),
+    (6,(SELECT ID FROM USUARIO WHERE USUARIO = 'manuel' LIMIT 1)),
+    (6,(SELECT ID FROM USUARIO WHERE USUARIO = 'sergio' LIMIT 1)),
+    (6,(SELECT ID FROM USUARIO WHERE USUARIO = 'javi' LIMIT 1)),
+    (7,(SELECT ID FROM USUARIO WHERE USUARIO = 'zaira' LIMIT 1)),
+    (7,(SELECT ID FROM USUARIO WHERE USUARIO = 'sergio' LIMIT 1)),
+    (7,(SELECT ID FROM USUARIO WHERE USUARIO = 'javi' LIMIT 1)),
+    (7,(SELECT ID FROM USUARIO WHERE USUARIO = 'pepe' LIMIT 1)),
+    (8,(SELECT ID FROM USUARIO WHERE USUARIO = 'juan' LIMIT 1)),
+    (8,(SELECT ID FROM USUARIO WHERE USUARIO = 'dani' LIMIT 1)),
+    (8,(SELECT ID FROM USUARIO WHERE USUARIO = 'maria' LIMIT 1)),
+    (8,(SELECT ID FROM USUARIO WHERE USUARIO = 'javi' LIMIT 1)),
+    (9,(SELECT ID FROM USUARIO WHERE USUARIO = 'javi' LIMIT 1)),
+    (9,(SELECT ID FROM USUARIO WHERE USUARIO = 'manuel' LIMIT 1)),
+    (9,(SELECT ID FROM USUARIO WHERE USUARIO = 'sergio' LIMIT 1)),
+    (9,(SELECT ID FROM USUARIO WHERE USUARIO = 'dani' LIMIT 1)),
+    (10,(SELECT ID FROM USUARIO WHERE USUARIO = 'javi' LIMIT 1)),
+    (10,(SELECT ID FROM USUARIO WHERE USUARIO = 'maria' LIMIT 1)),
+    (10,(SELECT ID FROM USUARIO WHERE USUARIO = 'zaira' LIMIT 1)),
+    (10,(SELECT ID FROM USUARIO WHERE USUARIO = 'pepe' LIMIT 1)),
+    
+    (11,(SELECT ID FROM USUARIO WHERE USUARIO = 'javi' LIMIT 1)),
+    (11,(SELECT ID FROM USUARIO WHERE USUARIO = 'dani' LIMIT 1)),
+    (12,(SELECT ID FROM USUARIO WHERE USUARIO = 'pepe' LIMIT 1)),
+    (12,(SELECT ID FROM USUARIO WHERE USUARIO = 'maria' LIMIT 1)),
+    (13,(SELECT ID FROM USUARIO WHERE USUARIO = 'juan' LIMIT 1)),
+    (13,(SELECT ID FROM USUARIO WHERE USUARIO = 'javi' LIMIT 1)),
+    (14,(SELECT ID FROM USUARIO WHERE USUARIO = 'pepe' LIMIT 1)),
+    (14,(SELECT ID FROM USUARIO WHERE USUARIO = 'maria' LIMIT 1)),
+    (15,(SELECT ID FROM USUARIO WHERE USUARIO = 'javi' LIMIT 1)),
+    (15,(SELECT ID FROM USUARIO WHERE USUARIO = 'maria' LIMIT 1)) ;
+    
+INSERT INTO AMISTOSO (FECHA, HORA, LOCALIZACION, ID_DEPORTE, ID_EQUIPO1, ID_EQUIPO2, PUNTOS_EQUIPO1, PUNTOS_EQUIPO2, DISPONIBLE, LATITUD, LONGITUD) VALUES
+    ('2024-03-15', '15:00', 'C. Rosario, 13, 11004 Cádiz', (SELECT ID FROM DEPORTE WHERE NOMBRE = 'Ajedrez'), (SELECT ID FROM EQUIPO WHERE NOMBRE = 'Alfil Chapucero'), (SELECT ID FROM EQUIPO WHERE NOMBRE = 'Peon de obra'), 1, 0, false, 36.533479891042454, -6.295738823609933),
+    ('2024-04-01', '11:00', 'C. San Antonio de Padua, 7, 11510 El Pinar, Cádiz', (SELECT ID FROM DEPORTE WHERE NOMBRE = 'Padel'), (SELECT ID FROM EQUIPO WHERE NOMBRE = 'La casa de padel'), (SELECT ID FROM EQUIPO WHERE NOMBRE = 'Campearredes'), 1, 0, false, 36.531670804863616, -6.1903373356896445),
+    ('2024-04-15', '12:00', 'C. Zahara de los Atunes, 15-18, 11510 Puerto Real, Cádiz', (SELECT ID FROM DEPORTE WHERE NOMBRE = 'Billar'), (SELECT ID FROM EQUIPO WHERE NOMBRE = 'Carambola'), (SELECT ID FROM EQUIPO WHERE NOMBRE = 'Bolas gordas'), 1, 0, false, 36.52698038351389, -6.175994728315181),
+    ('2024-01-01', '8:00', 'C. Feduchy, 14D, 11001 Cádiz', (SELECT ID FROM DEPORTE WHERE NOMBRE = 'Ajedrez'), (SELECT ID FROM EQUIPO WHERE NOMBRE = 'Jaque'), (SELECT ID FROM EQUIPO WHERE NOMBRE = 'Peon de obra'), 1, 0, false, 36.532020602612384, -6.295278857143358),
+    ('2024-02-15', '21:00', '11100 San Fernando, Cádiz', (SELECT ID FROM DEPORTE WHERE NOMBRE = 'Padel'), (SELECT ID FROM EQUIPO WHERE NOMBRE = 'Palaso'), (SELECT ID FROM EQUIPO WHERE NOMBRE = 'La casa de padel'), 1, 0, false, 36.462194399308125, -6.200634300009491),
+    ('2024-02-01', '6:00', 'La Cortadura, 11011 Cádiz', (SELECT ID FROM DEPORTE WHERE NOMBRE = 'Billar'), (SELECT ID FROM EQUIPO WHERE NOMBRE = 'Bola 8'), (SELECT ID FROM EQUIPO WHERE NOMBRE = 'Carambola'), 1, 0, false, 36.49987284168667, -6.262800083201751),
+    ('2024-03-15', '13:00', 'Barrio de Puntales, Cádiz', (SELECT ID FROM DEPORTE WHERE NOMBRE = 'Ajedrez'), (SELECT ID FROM EQUIPO WHERE NOMBRE = 'Alfil Chapucero'), (SELECT ID FROM EQUIPO WHERE NOMBRE = 'Jaque'), 1, 0, false, 36.50838552671616, -6.271210981268238),
+    ('2024-01-01', '12:00', 'Plaza Sta. Ana, 4, 11012 Cádiz', (SELECT ID FROM DEPORTE WHERE NOMBRE = 'Padel'), (SELECT ID FROM EQUIPO WHERE NOMBRE = 'Campearredes'), (SELECT ID FROM EQUIPO WHERE NOMBRE = 'Palaso'), 1, 0, false, 36.51472158904268, -6.27589986418753),
+    ('2024-02-15', '18:00', 'C. Crucero Baleares, 23, 11500 El Puerto de Sta María, Cádiz', (SELECT ID FROM DEPORTE WHERE NOMBRE = 'Billar'), (SELECT ID FROM EQUIPO WHERE NOMBRE = 'Taco Tactico'), (SELECT ID FROM EQUIPO WHERE NOMBRE = 'Bola 8'), 1, 0, false, 36.592306932974644, -6.237368653807938),
+    ('2024-03-01', '19:00', 'El Puerto de Sta María, Cádiz', (SELECT ID FROM DEPORTE WHERE NOMBRE = 'Ajedrez'), (SELECT ID FROM EQUIPO WHERE NOMBRE = 'Peon de obra'), (SELECT ID FROM EQUIPO WHERE NOMBRE = 'Alfil Chapucero'), 1, 0, false,36.5771061605788, -6.2227731240764905),
+    ('2024-01-15', '20:00', 'C. Columela, 37, 11004 Cádiz', (SELECT ID FROM DEPORTE WHERE NOMBRE = 'Padel'), (SELECT ID FROM EQUIPO WHERE NOMBRE = 'La casa de padel'), (SELECT ID FROM EQUIPO WHERE NOMBRE = 'Campearredes'), 1, 0, false, 36.53318038173513, -6.295097461664379),
+    ('2024-04-01', '15:00', 'Pl. de las Salinas, 4, 11100 San Fernando, Cádiz', (SELECT ID FROM DEPORTE WHERE NOMBRE = 'Billar'), (SELECT ID FROM EQUIPO WHERE NOMBRE = 'Carambola'), (SELECT ID FROM EQUIPO WHERE NOMBRE = 'Taco Tactico'), 1, 0, false, 36.472326212227685, -6.193119823490359 );
+
+    
+    
+    
+    

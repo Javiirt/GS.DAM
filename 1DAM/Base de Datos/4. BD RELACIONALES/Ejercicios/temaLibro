@@ -1,0 +1,16 @@
+CREATE TABLE Tema(
+  nombre VARCHAR(20),
+  lugar VARCHAR (20) NOT NULL,
+  PRIMARY KEY(nombre)  
+);
+CREATE TABLE Libro(
+  id int,
+  titulo VARCHAR (100) NOT NULL,
+  isbn CHAR (13) NOT NULL,
+  autor VARCHAR (20) NOT NULL,
+  nombre_tema VARCHAR(20) NOT NULL,
+  PRIMARY KEY(id),
+  CONSTRAINT FK_Libro_Tema_nombre
+    FOREIGN KEY (nombre_tema)
+    REFERENCES Tema(nombre)
+);

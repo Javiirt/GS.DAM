@@ -1,0 +1,160 @@
+1.
+
+a)for $x in doc("ejercicio_1_modulos_informatica")/ies/modulos/modulo
+return $x/nombre
+
+b)for $x in doc("ejercicio_1_modulos_informatica")/ies/modulos/modulo
+where $x/ciclo='ASIR'
+return $x/nombre/text()
+
+c)for $x in doc("ejercicio_1_modulos_informatica")/ies/modulos/modulo
+where $x/curso=2
+return $x/nombre
+
+D)for $x in doc("ejercicio_1_modulos_informatica")/ies/modulos/modulo
+where $x/curso=1 and $x/ciclo='ASIR'
+order by $x/nombre
+return $x/nombre
+
+e)for $x in doc("ejercicio_1_modulos_informatica")/ies/modulos/modulo
+where $x/horasSemanales<5
+return $x/nombre
+
+f)for $x at $cont in doc("ejercicio_1_modulos_informatica")/ies/modulos/modulo
+where $x/curso=1 and $x/ciclo='ASIR'
+return $cont
+
+g)for $x in doc("ejercicio_1_modulos_informatica")/ies/modulos/modulo
+where $x/horasSemanales>3
+return $x/horasSemanales/text()
+
+2.
+
+a)for $x in doc("ejercicio_2_bailes")/bailes/baile
+return $x/nombre/text()
+
+b)for $x in doc("ejercicio_2_bailes")/bailes/baile
+where $x/sala=1
+return $x/nombre
+
+c)for $x in doc("ejercicio_2_bailes")/bailes/baile
+where $x/sala=2 and $x/precio<35
+return $x/.
+
+
+d)for $x in doc("ejercicio_2_bailes")/bailes/baile
+where $x/precio[@cuota="mensual"]
+return $x/profesor/text()
+
+e)for $x at $cont in doc("ejercicio_2_bailes")/bailes/baile
+return 
+<bailes_lozano profesor="{$x/profesor}">
+  <baile num="{$cont}">
+    <nombre>{$x/nombre/text()}</nombre>
+    <plazas>{$x/plazas/text()}</plazas>
+    <duracion>De {$x/comienzo/text()} A {$x/fin/text()}</duracion>
+  </baile>
+</bailes_lozano>
+
+f)<html>
+<head>
+</head>
+<body>
+<table>
+<tr>
+{
+for $x in doc("ejercicio_2_bailes")/bailes/baile
+where $x/precio[@cuota="trimestral"]
+order by $x/plazas
+return <td>{$x/nombre}{$x/profesor}{$x/plazas}</td>
+}
+</tr>
+
+</table>
+</body>
+</html>
+
+3)
+A)for $x in doc("ejercicio_3_libros.xml")/bib/libro
+return $x/titulo/text()
+
+B)for $x in doc("ejercicio_3_libros.xml")/bib/libro
+where $x/.[@year="2000"]
+return $x/titulo
+
+C)for $x in doc("ejercicio_3_libros.xml")/bib/libro
+where $x/.[@year<="2000"] and $x/.[@year>="1995"]
+return $x/titulo
+
+D)for $x in doc("ejercicio_3_libros.xml")/bib/libro
+where $x/autor/apellido='Stevens'
+return $x/titulo/text()
+
+E)for $x in doc("ejercicio_3_libros.xml")/bib/libro
+where $x/editorial='Addison-Wesley'
+return $x/titulo
+
+for $x in doc("ejercicio_3_libros.xml")/bib/libro
+let $c := $x/editorial='Addison-Wesley'
+return $c
+
+
+let $c :=doc("ejercicio_3_libros.xml")/bib/libro[editorial='Addison-Wesley']/titulo
+return $c
+
+F)for $x in doc("ejercicio_3_libros.xml")/bib/libro
+let $y := $x/autor
+order by $x/precio
+return if (count($y)=1)
+then $x/titulo
+else ()
+
+G)for $x in doc("ejercicio_3_libros.xml")/bib/libro
+let $y := $x/autor
+order by $x/titulo
+return if (count($y)>=2)
+then $x/titulo
+else ()
+
+H)for $x in doc("ejercicio_3_libros.xml")/bib/libro
+let $y := $x/autor
+order by $x/titulo
+return <libro>{$x/titulo}<Autores>{(count($y))}</Autores><año>{data($x/[@year])}</año></libro>
+
+I)for $x in doc("ejercicio_3_libros.xml")/bib/libro
+let $y := $x/autor
+order by $x/titulo
+return <resumen><libro>{$x/titulo}<Autores>{(count($y))}</Autores><año>{data($x/[@year])}</año></libro></resumen>
+
+J)
+for $x in doc("ejercicio_3_libros.xml")/bib/libro
+return 
+
+<resumen>
+    <libro>{data($x/titulo)}</libro><numero></numero>
+    <autores>{for $y at $count in $x/autor return if($count<3) then <apellido>{data($y)}</apellido> else <apellido>et al.</apellido>
+}</autores>
+</resumen>
+
+
+
+
+K)for $x in doc("A/ejercicio_3_libros.xml")/bib/libro
+for $y in doc("A/ejercicio_3_libros_comentarios.xml")/comentarios/entrada
+let $z:=$y/comentario
+where $x/titulo=$y/titulo
+
+return if (count($y)>1)
+then <resumen_bib_com>{$x/titulo}<libro></libro></resumen_bib_com>
+else()
+
+
+
+L)
+
+
+
+
+
+
+
